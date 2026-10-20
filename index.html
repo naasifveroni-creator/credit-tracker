@@ -72,13 +72,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
 
   let me = null, tab = null, reqs = [], agentReqs = [], chime = null, creditTypes = [];
+  let lastKnownStatus = null; // Tracks agent status to trigger popup
+  
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config' };
   const TABS = {
     agent: ['Request','My requests'],
-    tl: ['Board','History'],
+    tl: ['Board','My team','History'],
     oam: ['Dashboard'],
     om: ['Dashboard'],
-    admin: ['Config','Roster']
+    admin: ['Config','Roster','Anomalies','Audit']
   };
 
   window.signIn = async () => {
@@ -115,7 +117,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (!document.getElementById('fref')) {
         refresh();
       }
-    }, 10000);
+    }, 10000); // 10 second polling
   }
 
   function subscribe() {
@@ -142,16 +144,33 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
   async function refresh() {
     if (!me) return;
+    
     if (me.role === 'tl' || me.role === 'admin' || me.role === 'oam' || me.role === 'om') {
       const { data } = await sb.from('customer_credit_requests').select('*')
         .order('created_at', { ascending:false }).limit(100);
       reqs = data || [];
     }
+    
     if (me.role === 'agent') {
       const { data } = await sb.from('customer_credit_requests').select('*')
         .eq('agent_id', me.person_id).order('created_at', { ascending:false }).limit(50);
       agentReqs = data || [];
+      
+      // THE FIX: Check if a status changed since last check
+      if (agentReqs.length > 0) {
+        const latest = agentReqs[0];
+        if (lastKnownStatus && lastKnownStatus === 'claimed' && ['approved','rejected'].includes(latest.status)) {
+           // Trigger the OS Popup alert!
+           if (latest.status === 'approved') {
+               alert("NOTIFICATION: Your request has been APPROVED.");
+           } else {
+               alert("NOTIFICATION: Your request was REJECTED.\nReason: " + (latest.rejection_reason || 'None provided'));
+           }
+        }
+        lastKnownStatus = latest.status;
+      }
     }
+    
     render();
   }
 
@@ -166,9 +185,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `<button class="${t===tab?'on':''}" onclick="setTab('${t}')">${t}</button>`).join('');
     const V = {
       'Request': viewAgentRequest, 'My requests': viewAgentHistory,
-      'Board': viewTLBoard, 'History': viewTLHistory,
+      'Board': viewTLBoard, 'My team': viewTLTeam, 'History': viewTLHistory,
       'Dashboard': viewDash,
-      'Config': viewConfig, 'Roster': viewRoster
+      'Config': viewConfig, 'Roster': viewRoster, 'Anomalies': viewAnoms, 'Audit': viewAudit
     };
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
   }
@@ -182,19 +201,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
               <option value="SKYMILES">SkyMiles</option>
               <option value="SERVICE">Service Credit</option>`;
     }
-
-    // Check if there's a recently decided request to show a banner
-    const recentlyDecided = agentReqs.find(r => ['approved','rejected'].includes(r.status) && (Date.now() - new Date(r.decided_at).getTime()) < 30000);
-    let banner = '';
-    if (recentlyDecided) {
-      if (recentlyDecided.status === 'approved') {
-        banner = `<div class="fl ok"><b>Request Approved!</b> Your request for ${recentlyDecided.currency} ${recentlyDecided.amount} was approved.</div>`;
-      } else {
-        banner = `<div class="fl no"><b>Request Rejected</b> Reason: ${esc(recentlyDecided.rejection_reason)}</div>`;
-      }
-    }
     
-    return banner + `
+    return `
     <div class="card">
       <h3>New customer credit request</h3>
       <div class="row">
@@ -262,6 +270,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       $('#fmsg').textContent = 'Submitted: ' + data.request_id;
       $('#fmsg').style.color = 'var(--ok)';
       $('#fref').value = ''; $('#fnotes').value = ''; $('#frec').value = '';
+      lastKnownStatus = 'pending';
       await refresh();
     }
   };
@@ -278,6 +287,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       ${claimedByMe.map(tlCard).join('') || '<p class="mu">Nothing.</p>'}
       <h2>Claimed by others</h2>
       ${claimedByOthers.map(tlCard).join('') || '<p class="mu">Nothing.</p>'}`;
+  }
+
+  function viewTLTeam() {
+    return '<p class="mu">Team roster — see Admin → Roster.</p>';
   }
 
   function tlCard(r) {
@@ -406,6 +419,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#rmsg').textContent = `Done! ${success} loaded, ${failed} failed.`;
     $('#rmsg').style.color = 'var(--ok)';
   };
+
+  function viewAnoms() { return '<p class="mu">Anomaly list coming in v2.</p>'; }
+  function viewAudit() { return '<p class="mu">Audit log coming in v2.</p>'; }
 
   boot();
 </script></body></html>
