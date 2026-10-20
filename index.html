@@ -31,7 +31,6 @@ button.r{border-color:var(--ac);color:var(--ac)}button.g{border-color:var(--ok);
 .s-approved{color:var(--ok);border-color:var(--ok)}.s-pending,.s-claimed{color:var(--wn);border-color:var(--wn)}
 .s-rejected,.s-expired,.s-cancelled{color:var(--ac);border-color:var(--ac)}.s-deferred{color:var(--mu)}
 .fl{padding:8px 12px;border-radius:6px;margin-bottom:10px;border:1px solid}.fl.ok{color:var(--ok);border-color:var(--ok)}.fl.no{color:var(--ac);border-color:var(--ac)}
-.timer{font-variant-numeric:tabular-nums;font-weight:700}.timer.warn{color:var(--wn)}.timer.hot{color:var(--ac)}
 textarea{width:100%;min-height:80px;font-family:inherit}
 .req{background:var(--cd);border:1px solid var(--bd);border-radius:8px;padding:14px;margin-bottom:10px}
 .req.urgent{border-color:var(--ac);box-shadow:0 0 0 2px color-mix(in srgb,var(--ac) 20%,transparent)}
@@ -66,7 +65,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  // THREE L's verified
   const sb = supabase.createClient('https://gyrmlllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
   const $ = s => document.querySelector(s);
   const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -112,9 +110,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     buildNav();
     await refresh();
     subscribe();
-    setInterval(tickTimers, 1000);
     
-    // THE FIX: Only refresh if the user is NOT typing in the form
+    // Auto-refresh, but pause if typing
     setInterval(() => {
       if (!document.getElementById('fref')) {
         refresh();
@@ -161,16 +158,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       reqs = data || [];
     }
     render();
-  }
-
-  function tickTimers() {
-    document.querySelectorAll('[data-exp]').forEach(el => {
-      const t = new Date(el.dataset.exp) - Date.now();
-      if (t <= 0) { el.textContent = 'EXPIRED'; el.className = 'timer hot'; return; }
-      const s = Math.floor(t/1000), m = Math.floor(s/60);
-      el.textContent = `${m}:${String(s%60).padStart(2,'0')}`;
-      el.className = 'timer ' + (s < 30 ? 'hot' : s < 60 ? 'warn' : '');
-    });
   }
 
   function buildNav() {
@@ -237,7 +224,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <span>${esc(r.customer_reference)}</span>
         <span>${r.currency} ${fmt(r.amount)}</span>
         <span>${esc(r.reason_code)}</span>
-        <span class="timer" data-exp="${r.expires_at}">…</span>
       </div>
       <div style="margin-top:6px"><b>${r.status==='claimed'?'TL reviewing':'Waiting for TL'}</b>${r.claimed_by_tl_id?' — '+esc(r.claimed_by_tl_id):''}</div>
       <div class="acts">
@@ -283,8 +269,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   };
 
   function viewTLBoard() {
-    const pending = reqs.filter(r => r.status === 'pending')
-      .sort((a,b) => new Date(a.expires_at) - new Date(b.expires_at));
+    const pending = reqs.filter(r => r.status === 'pending');
     const claimedByMe = reqs.filter(r => r.status === 'claimed' && r.claimed_by_tl_id === me.person_id);
     const claimedByOthers = reqs.filter(r => r.status === 'claimed' && r.claimed_by_tl_id !== me.person_id);
 
@@ -303,7 +288,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     return `<div class="req ${cls}">
       <div class="meta">
         <span><b>${r.request_id}</b></span>
-        <span><span class="timer" data-exp="${r.expires_at}">…</span></span>
         <span>Agent: ${esc(r.agent_name||'')}</span>
         <span>${esc(r.reason_code)}</span>
         <span><b>${r.currency} ${fmt(r.amount)}</b></span>
@@ -347,11 +331,21 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   };
 
   function viewTLTeam() { return '<p class="mu">Team roster — see Admin → Roster.</p>'; }
+  
   function viewTLHistory() {
-    const done = reqs.filter(r => ['approved','rejected'].includes(r.status)).slice(0,50);
+    const done = reqs.filter(r => ['approved','rejected'].includes(r.status));
     return '<h2>Recent decisions</h2>' + (done.map(r => `
-      <div class="req"><div class="meta"><b>${r.request_id}</b><span>${esc(r.agent_id)}</span>
-      <span>${r.currency} ${fmt(r.amount)}</span><span class="pill s-${r.status}">${r.status}</span></div></div>`).join('') || '<p class="mu">No history.</p>');
+      <div class="req">
+        <div class="meta">
+          <b>${r.request_id}</b>
+          <span>${esc(r.agent_name)}</span>
+          <span>${r.currency} ${fmt(r.amount)}</span>
+          <span class="pill s-${r.status}">${r.status}</span>
+        </div>
+        <div class="notes">${esc(r.reason_notes||'')}</div>
+        ${r.decision_notes ? '<div class="mu" style="font-size:12px;margin-top:4px">TL Notes: '+esc(r.decision_notes)+'</div>' : ''}
+        ${r.rejection_reason ? '<div class="mu" style="font-size:12px;margin-top:4px;color:var(--ac)">Reason: '+esc(r.rejection_reason)+'</div>' : ''}
+      </div>`).join('') || '<p class="mu">No history yet. Once you approve or reject requests, they will appear here.</p>');
   }
 
   function viewDash() {
@@ -386,6 +380,5 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   function viewAnoms() { return '<p class="mu">Anomaly list coming in v2.</p>'; }
   function viewAudit() { return '<p class="mu">Audit log coming in v2.</p>'; }
 
-  // Run boot immediately
   boot();
 </script></body></html>
