@@ -72,7 +72,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
 
   let me = null, tab = null, reqs = [], agentReqs = [], chime = null, creditTypes = [];
-  let lastKnownStatus = null; // Tracks agent status to trigger popup
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config' };
   const TABS = {
@@ -117,7 +116,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (!document.getElementById('fref')) {
         refresh();
       }
-    }, 10000); // 10 second polling
+    }, 10000); // Fallback polling
   }
 
   function subscribe() {
@@ -125,7 +124,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       .on('postgres_changes', { event:'*', schema:'public', table:'customer_credit_requests' },
         async payload => {
           if (!document.getElementById('fref')) { await refresh(); }
-          if (payload.eventType === 'INSERT' && me.role === 'tl') playChime();
+          
+          // TL Notification: Plays chime when a new request arrives
+          if (payload.eventType === 'INSERT' && me.role === 'tl') {
+            playChime();
+          }
+
+          // AGENT NOTIFICATION: Fires alert instantly when their request changes to approved/rejected
+          if (payload.eventType === 'UPDATE' && me.role === 'agent' && payload.new.agent_id === me.person_id) {
+            if (payload.new.status === 'approved') {
+              alert("NOTIFICATION: Your request has been APPROVED.");
+            } else if (payload.new.status === 'rejected') {
+              alert("NOTIFICATION: Your request was REJECTED.\nReason: " + (payload.new.rejection_reason || 'None provided'));
+            }
+          }
         })
       .subscribe();
   }
@@ -155,20 +167,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       const { data } = await sb.from('customer_credit_requests').select('*')
         .eq('agent_id', me.person_id).order('created_at', { ascending:false }).limit(50);
       agentReqs = data || [];
-      
-      // THE FIX: Check if a status changed since last check
-      if (agentReqs.length > 0) {
-        const latest = agentReqs[0];
-        if (lastKnownStatus && lastKnownStatus === 'claimed' && ['approved','rejected'].includes(latest.status)) {
-           // Trigger the OS Popup alert!
-           if (latest.status === 'approved') {
-               alert("NOTIFICATION: Your request has been APPROVED.");
-           } else {
-               alert("NOTIFICATION: Your request was REJECTED.\nReason: " + (latest.rejection_reason || 'None provided'));
-           }
-        }
-        lastKnownStatus = latest.status;
-      }
     }
     
     render();
@@ -270,7 +268,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       $('#fmsg').textContent = 'Submitted: ' + data.request_id;
       $('#fmsg').style.color = 'var(--ok)';
       $('#fref').value = ''; $('#fnotes').value = ''; $('#frec').value = '';
-      lastKnownStatus = 'pending';
       await refresh();
     }
   };
