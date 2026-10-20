@@ -64,11 +64,12 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   <main id="mn"></main>
 </div>
 
-<script type="module">
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+<!-- LOAD SUPABASE AS A STANDARD SCRIPT -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-// FIXED URL: gyrmllok (two L's)
-const sb = createClient('https://gyrmllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
+<!-- NO MODULE, NO IMPORT -->
+<script>
+const sb = supabase.createClient('https://gyrmllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
 const $ = s => document.querySelector(s);
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => Math.round(n||0).toLocaleString();
@@ -87,7 +88,7 @@ const TABS = {
 
 /* ---------- AUTH ---------- */
 window.signIn = async () => {
-  $('#am').textContent = '';
+  $('#am').textContent = 'Signing in...';
   const { error } = await sb.auth.signInWithPassword({
     email: $('#ai').value.trim(), password: $('#ap').value
   });
