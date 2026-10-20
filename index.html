@@ -65,8 +65,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 </div>
 
 <script type="module">
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
+// FIXED URL: gyrmllok (two L's)
 const sb = createClient('https://gyrmllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
 const $ = s => document.querySelector(s);
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -106,7 +107,6 @@ async function boot() {
   tab = DEFAULT_TAB[me.role];
   $('#auth').hidden = true; $('#app').hidden = false;
   
-  // Load active credit types for the agent dropdown
   const { data: types } = await sb.from('credit_types').select('*').eq('active', true);
   creditTypes = types || [];
   
