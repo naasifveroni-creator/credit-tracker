@@ -50,7 +50,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   <input id="ai" type="email" autocomplete="username">
   <label style="font-size:12px;color:var(--mu)">Password</label>
   <input id="ap" type="password" autocomplete="current-password">
-  <button id="loginBtn" class="b" style="width:100%" onclick="signIn()">Sign in</button>
+  <button class="b" style="width:100%" onclick="signIn()">Sign in</button>
   <div id="am" style="margin-top:12px;font-size:13px;color:var(--ac)"></div>
 </div>
 
@@ -64,24 +64,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   <main id="mn"></main>
 </div>
 
-<!-- BULLETPROOF SCRIPT LOADING -->
+<!-- LOAD SUPABASE -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-  if (typeof supabase === 'undefined') {
-    // If the CDN is blocked, try the fallback
-    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
-  }
-</script>
-<script>
-  window.onload = function() {
-    if (typeof supabase === 'undefined') {
-      document.getElementById('am').textContent = "Error: Cannot load Supabase. Your network is blocking the CDN.";
-      return;
-    }
-    boot();
-  };
 
+<script>
+  // 1. Initialize Supabase
   const sb = supabase.createClient('https://gyrmllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
+  
   const $ = s => document.querySelector(s);
   const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const fmt = n => Math.round(n||0).toLocaleString();
@@ -490,5 +479,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     return '<p class="mu">Audit log — coming soon.</p>';
   }
 
+  // 3. Start the app NOW that everything is loaded
+  boot();
   sb.auth.onAuthStateChange((_e, _s) => { if (!_s) location.reload(); });
 </script></body></html>
