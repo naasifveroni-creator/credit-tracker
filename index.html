@@ -66,6 +66,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+  // THREE L's verified
   const sb = supabase.createClient('https://gyrmlllokrfcqzljkwdx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cm1sbGxva3JmY3F6bGprd2R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0ODcxOTYsImV4cCI6MjEwODA2MzE5Nn0.eUvAsDVN9fiF9Y_tgb632vQ_VWAvsQFeDvU_jHZ8-5Y');
   const $ = s => document.querySelector(s);
   const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -112,14 +113,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     await refresh();
     subscribe();
     setInterval(tickTimers, 1000);
-    setInterval(refresh, 15000);
+    
+    // THE FIX: Only refresh if the user is NOT typing in the form
+    setInterval(() => {
+      if (!document.getElementById('fref')) {
+        refresh();
+      }
+    }, 15000);
   }
 
   function subscribe() {
     sb.channel('ccr')
       .on('postgres_changes', { event:'*', schema:'public', table:'customer_credit_requests' },
         async payload => {
-          await refresh();
+          if (!document.getElementById('fref')) { await refresh(); }
           if (payload.eventType === 'INSERT' && me.role === 'tl') playChime();
         })
       .subscribe();
