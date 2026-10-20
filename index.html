@@ -130,8 +130,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             playChime();
           }
 
-          // AGENT NOTIFICATION: Fires alert instantly when their request changes to approved/rejected
+          // AGENT NOTIFICATION: Plays chime and fires popup instantly when their request changes
           if (payload.eventType === 'UPDATE' && me.role === 'agent' && payload.new.agent_id === me.person_id) {
+            playChime();
             if (payload.new.status === 'approved') {
               alert("NOTIFICATION: Your request has been APPROVED.");
             } else if (payload.new.status === 'rejected') {
