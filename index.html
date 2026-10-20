@@ -116,21 +116,29 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (!document.getElementById('fref')) {
         refresh();
       }
-    }, 10000); // Fallback polling
+    }, 10000);
   }
 
   function subscribe() {
     sb.channel('ccr')
       .on('postgres_changes', { event:'*', schema:'public', table:'customer_credit_requests' },
         async payload => {
-          if (!document.getElementById('fref')) { await refresh(); }
           
-          // TL Notification: Plays chime when a new request arrives
+          // 1. Update the UI FIRST so it's ready when they close the popup
+          if (!document.getElementById('fref')) { 
+            await refresh(); 
+          } else if (me.role === 'agent') {
+            const { data } = await sb.from('customer_credit_requests').select('*')
+              .eq('agent_id', me.person_id).order('created_at', { ascending:false }).limit(50);
+            agentReqs = data || [];
+          }
+
+          // 2. TL Notification (New requests)
           if (payload.eventType === 'INSERT' && me.role === 'tl') {
             playChime();
           }
 
-          // AGENT NOTIFICATION: Plays chime and fires popup instantly when their request changes
+          // 3. AGENT NOTIFICATION (Status updates)
           if (payload.eventType === 'UPDATE' && me.role === 'agent' && payload.new.agent_id === me.person_id) {
             playChime();
             if (payload.new.status === 'approved') {
