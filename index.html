@@ -72,6 +72,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
 
   let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], chime = null, creditTypes = [], drillDown = null;
+  let adminSelectedOam = null, adminSelectedTl = null;
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config' };
   const TABS = {
@@ -79,7 +80,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     tl: ['Board','My team','History'],
     oam: ['Dashboard'],
     om: ['Dashboard'],
-    admin: ['Config','Roster','Anomalies','Audit']
+    admin: ['Config','Roster','Hierarchy','Anomalies','Audit']
   };
 
   window.signIn = async () => {
@@ -108,8 +109,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const { data: types } = await sb.from('credit_types').select('*').eq('active', true);
     creditTypes = types || [];
 
-    // Fetch TLs and OAMs if the user is an OAM or OM
-    if (me.role === 'oam' || me.role === 'om') {
+    // Fetch TLs and OAMs for OAM, OM, and Admin
+    if (me.role === 'oam' || me.role === 'om' || me.role === 'admin') {
       const { data: tlData } = await sb.from('tls').select('*');
       tls = tlData || [];
       
@@ -200,7 +201,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       'Request': viewAgentRequest, 'My requests': viewAgentHistory,
       'Board': viewTLBoard, 'My team': viewTLTeam, 'History': viewTLHistory,
       'Dashboard': viewDash,
-      'Config': viewConfig, 'Roster': viewRoster, 'Anomalies': viewAnoms, 'Audit': viewAudit
+      'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Anomalies': viewAnoms, 'Audit': viewAudit
     };
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
   }
@@ -569,6 +570,114 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#rmsg').textContent = `Done! ${success} loaded, ${failed} failed.`;
     $('#rmsg').style.color = 'var(--ok)';
   };
+
+  // --- HIERARCHY MANAGEMENT ---
+  window.selectAdminOam = (id) => { adminSelectedOam = id; adminSelectedTl = null; render(); };
+  window.selectAdminTl = (id) => { adminSelectedTl = id; render(); };
+  
+  window.moveTl = async (tlId, newOamId) => {
+    if (!newOamId) return;
+    const { data: oam } = await sb.from('oams').select('om_id').eq('oam_id', newOamId).single();
+    if (!oam) return alert('Invalid OAM');
+    
+    await sb.from('tls').update({ oam_id: newOamId, om_id: oam.om_id }).eq('tl_id', tlId);
+    // Also update all agents under this TL
+    await sb.from('agents').update({ oam_id: newOamId, om_id: oam.om_id }).eq('tl_id', tlId);
+    
+    // Refresh local data
+    const { data: tlData } = await sb.from('tls').select('*');
+    tls = tlData || [];
+    alert('TL moved successfully!');
+    render();
+  };
+
+  window.moveAgent = async (agentId, newTlId) => {
+    if (!newTlId) return;
+    const { data: tl } = await sb.from('tls').select('oam_id, om_id').eq('tl_id', newTlId).single();
+    if (!tl) return alert('Invalid TL');
+    
+    await sb.from('agents').update({ tl_id: newTlId, oam_id: tl.oam_id, om_id: tl.om_id }).eq('agent_id', agentId);
+    alert('Agent moved successfully!');
+    render();
+  };
+
+  function viewHierarchy() {
+    if (!adminSelectedOam) {
+      const oamOpts = oams.map(o => `<option value="${o.oam_id}">${esc(o.name)} (${esc(o.oam_id)})</option>`).join('');
+      return `
+        <h2>Manage Hierarchy</h2>
+        <div class="card row">
+          <label>Select an OAM to view their TLs<select onchange="selectAdminOam(this.value)">
+            <option value="">-- Choose OAM --</option>
+            ${oamOpts}
+          </select></label>
+        </div>
+      `;
+    }
+
+    const currentOam = oams.find(o => o.oam_id === adminSelectedOam);
+    const oamTls = tls.filter(t => t.oam_id === adminSelectedOam);
+    
+    let html = `<p><button class="s" onclick="selectAdminOam(null)">← Back to OAMs</button></p>
+    <h2>OAM: ${esc(currentOam.name)}</h2>
+    <div class="tw"><table><thead><tr>
+      <th>TL Name (ID)</th><th>Move to OAM</th><th>Action</th>
+    </tr></thead><tbody>
+      ${oamTls.map(t => {
+        const oamOpts = oams.map(o => `<option value="${o.oam_id}" ${o.oam_id === t.oam_id ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+        return `<tr>
+          <td>${esc(t.name)} (${esc(t.tl_id)})</td>
+          <td>
+            <select onchange="moveTl('${esc(t.tl_id)}', this.value)">
+              ${oamOpts}
+            </select>
+          </td>
+          <td><button class="s" onclick="selectAdminTl('${esc(t.tl_id)}')">View Agents</button></td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="3" class="mu">No TLs under this OAM.</td></tr>'}
+    </tbody></table></div>`;
+
+    if (adminSelectedTl) {
+      const tl = tls.find(t => t.tl_id === adminSelectedTl);
+      // We need to fetch agents for this TL
+      // Since we don't have agents in memory, we'll do a quick fetch
+      const agentListDiv = `<div id="agentList"><p class="mu">Loading agents...</p></div>`;
+      
+      // Quick async fetch and inject
+      setTimeout(async () => {
+        const { data: agents } = await sb.from('agents').select('*').eq('tl_id', adminSelectedTl);
+        const allTls = tls; // Use the already fetched TLs
+        
+        const agentRows = (agents || []).map(a => {
+          const tlOpts = allTls.map(x => `<option value="${x.tl_id}" ${x.tl_id === a.tl_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+          return `<tr>
+            <td>${esc(a.name)} (${esc(a.agent_id)})</td>
+            <td>
+              <select onchange="moveAgent('${esc(a.agent_id)}', this.value)">
+                ${tlOpts}
+              </select>
+            </td>
+          </tr>`;
+        }).join('');
+
+        const el = document.getElementById('agentList');
+        if (el) {
+          el.innerHTML = `
+            <h2>Agents under TL: ${esc(tl.name)}</h2>
+            <div class="tw"><table><thead><tr>
+              <th>Agent Name (ID)</th><th>Move to TL</th>
+            </tr></thead><tbody>
+              ${agentRows || '<tr><td colspan="2" class="mu">No agents under this TL.</td></tr>'}
+            </tbody></table></div>
+          `;
+        }
+      }, 100);
+
+      html += agentListDiv;
+    }
+
+    return html;
+  }
 
   function viewAnoms() { return '<p class="mu">Anomaly list coming in v2.</p>'; }
   function viewAudit() { return '<p class="mu">Audit log coming in v2.</p>'; }
