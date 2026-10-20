@@ -111,7 +111,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     await refresh();
     subscribe();
     
-    // Auto-refresh, but pause if typing
     setInterval(() => {
       if (!document.getElementById('fref')) {
         refresh();
@@ -376,7 +375,52 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   function viewTLPerf() { return '<p class="mu">TL performance dashboard coming in v2.</p>'; }
   function viewCampaign() { return '<p class="mu">Campaign stats coming in v2.</p>'; }
   function viewConfig() { return '<p class="mu">Edit config in Supabase.</p>'; }
-  function viewRoster() { return '<p class="mu">Roster upload coming in v2.</p>'; }
+  
+  function viewRoster() {
+    return `
+      <h2>Bulk Roster Upload</h2>
+      <div class="card">
+        <p class="mu" style="margin-top:0">Paste your CSV data below. Format: <code>BMS ID | Name | Email | PPR | Wave | TL ID</code></p>
+        <textarea id="ru" placeholder="6332878 | Abrahams, Machandro | m.abrahams@delta.example | 2581441 | 26.21 | 5972127"></textarea>
+        <p><button class="b" onclick="uploadRoster()">Upload Roster</button> <span id="rmsg" class="mu" style="margin-left:10px"></span></p>
+      </div>`;
+  }
+
+  window.uploadRoster = async () => {
+    $('#rmsg').textContent = 'Uploading…';
+    $('#rmsg').style.color = 'var(--mu)';
+    const lines = $('#ru').value.split('\n').map(s => s.trim()).filter(Boolean);
+    let success = 0, failed = 0;
+    
+    for (const line of lines) {
+      const parts = line.split('|').map(s => s.trim());
+      if (parts.length < 6) { failed++; continue; }
+      
+      const [id, name, email, ppr, wave, tlid] = parts;
+      const isNA = !tlid || tlid.toUpperCase() === 'NA';
+      
+      // Lookup OAM/OM if TL is provided
+      let oam_id = null, om_id = null;
+      if (!isNA) {
+        const { data: tl } = await sb.from('tls').select('oam_id, om_id').eq('tl_id', tlid).maybeSingle();
+        if (tl) { oam_id = tl.oam_id; om_id = tl.om_id; }
+      }
+      
+      const { error } = await sb.from('agents').upsert({
+        agent_id: id, name: name, email: email, 
+        ppr: ppr || null, wave: wave?.replace(/\s+/g,'') || null,
+        tl_id: isNA ? null : tlid,
+        oam_id: oam_id, om_id: om_id,
+        reports_direct_to_oam: isNA, status: 'active'
+      });
+      
+      if (error) { console.error(error); failed++; } else { success++; }
+    }
+    
+    $('#rmsg').textContent = `Done! ${success} loaded, ${failed} failed.`;
+    $('#rmsg').style.color = 'var(--ok)';
+  };
+
   function viewAnoms() { return '<p class="mu">Anomaly list coming in v2.</p>'; }
   function viewAudit() { return '<p class="mu">Audit log coming in v2.</p>'; }
 
