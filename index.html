@@ -74,7 +74,7 @@ const fmt = n => Math.round(n||0).toLocaleString();
 const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
 const pct = n => (100*n||0).toFixed(1)+'%';
 
-let me = null, tab = null, reqs = [], agentReqs = [], chime = null;
+let me = null, tab = null, reqs = [], agentReqs = [], chime = null, creditTypes = [];
 const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config' };
 const TABS = {
   agent: ['Request','My requests'],
@@ -97,12 +97,19 @@ window.signOut = async () => { await sb.auth.signOut(); location.reload(); };
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { $('#auth').hidden = false; $('#app').hidden = true; return; }
+  
   const { data: prof, error } = await sb.rpc('link_profile');
   if (error) { alert('Sign-in error: ' + error.message); return signOut(); }
+  
   me = prof;
   $('#who').textContent = `${me.display_name} · ${me.role.toUpperCase()} · ${me.person_id}`;
   tab = DEFAULT_TAB[me.role];
   $('#auth').hidden = true; $('#app').hidden = false;
+  
+  // Load active credit types for the agent dropdown
+  const { data: types } = await sb.from('credit_types').select('*').eq('active', true);
+  creditTypes = types || [];
+  
   buildNav();
   await refresh();
   subscribe();
@@ -190,12 +197,13 @@ function render() {
 
 /* ============ AGENT ============ */
 function viewAgentRequest() {
+  const opts = creditTypes.map(t => `<option value="${esc(t.credit_type_id)}">${esc(t.name)}</option>`).join('');
   return `
   <div class="card">
     <h3>New customer credit request</h3>
     <div class="row">
       <label>Customer ref (PNR / booking / case)<input id="fref" placeholder="e.g. PNR-ABC123"></label>
-      <label>Type<select id="ftype"></select></label>
+      <label>Type<select id="ftype">${opts}</select></label>
       <label>Amount<input id="famt" type="number" min="1" style="width:110px"></label>
       <label>Currency<select id="fcur"><option>ZAR</option><option>USD</option></select></label>
       <label>Reason<select id="frc">
