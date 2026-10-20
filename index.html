@@ -359,86 +359,112 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewDash() {
-    if (me.role === 'om' || me.role === 'admin') {
-      // Keep the existing simple view for OMs/Admins for now
-      const tot = reqs.length;
-      const approved = reqs.filter(r => r.status === 'approved').length;
-      const rejected = reqs.filter(r => r.status === 'rejected').length;
-      const liability = reqs.filter(r => r.status === 'approved').reduce((s,r) => s + +r.amount, 0);
+    if (me.role === 'oam') {
+      const myTls = tls.filter(t => t.oam_id === me.oam_id);
+      const tlIds = myTls.map(t => t.tl_id);
+      const myReqs = reqs.filter(r => tlIds.includes(r.agent_team_tl_id));
+      
+      const approved = myReqs.filter(r => r.status === 'approved').length;
+      const totalDecided = myReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
+      const liability = myReqs.filter(r => r.status === 'approved').reduce((s,r) => s + +r.amount, 0);
+      const issues = myReqs.filter(r => ['rejected', 'expired'].includes(r.status));
+
+      const tlRollup = myTls.map(t => {
+        const tlReqs = myReqs.filter(r => r.agent_team_tl_id === t.tl_id);
+        const tlApproved = tlReqs.filter(r => r.status === 'approved').length;
+        const tlDecided = tlReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
+        const rate = tlDecided > 0 ? Math.round((tlApproved / tlDecided) * 100) + '%' : '—';
+        return `<tr>
+          <td>${esc(t.name)} (${esc(t.tl_id)})</td>
+          <td>${tlReqs.length}</td>
+          <td>${rate}</td>
+        </tr>`;
+      }).join('');
+
       return `
         <div class="kp">
-          <div><b>${tot}</b><span>Total requests</span></div>
-          <div><b>${approved}</b><span>Approved</span></div>
-          <div><b>${rejected}</b><span>Rejected</span></div>
-          <div><b>${fmt(liability)}</b><span>Approved liability</span></div>
+          <div><b>${myTls.length}</b><span>TLs in your remit</span></div>
+          <div><b>${myReqs.length}</b><span>Total requests</span></div>
+          <div><b>${totalDecided > 0 ? Math.round((approved/totalDecided)*100) : 0}%</b><span>Approval rate</span></div>
+          <div><b>${fmt(liability)}</b><span>Approved Liability</span></div>
         </div>
-        <h2>Recent requests</h2>
+
+        <h2>TL Rollup</h2>
         <div class="tw"><table><thead><tr>
-          <th>Request</th><th>Agent</th><th>Amount</th><th>Status</th><th>When</th>
+          <th>Team Leader</th><th>Requests</th><th>Approval Rate</th>
         </tr></thead><tbody>
-          ${reqs.slice(0,50).map(r => `<tr>
-            <td>${r.request_id}</td><td>${esc(r.agent_id)}</td>
+          ${tlRollup || '<tr><td colspan="3" class="mu">No TLs found in your remit.</td></tr>'}
+        </tbody></table></div>
+
+        <h2>Issues for follow-up (Rejected / Expired)</h2>
+        <div class="tw"><table><thead><tr>
+          <th>Request</th><th>Agent</th><th>TL</th><th>Amount</th><th>Status</th><th>Reason</th>
+        </tr></thead><tbody>
+          ${issues.map(r => `<tr>
+            <td>${r.request_id}</td>
+            <td>${esc(r.agent_id)}</td>
+            <td>${esc(r.agent_team_tl_id)}</td>
             <td>${r.currency} ${fmt(r.amount)}</td>
             <td><span class="pill s-${r.status}">${r.status}</span></td>
-            <td>${dt(r.created_at)}</td>
-          </tr>`).join('') || '<tr><td colspan="5" class="mu">No data.</td></tr>'}
-        </tbody></table></div>`;
+            <td>${esc(r.rejection_reason || 'No reason provided')}</td>
+          </tr>`).join('') || '<tr><td colspan="6" class="mu">No issues found! Great job.</td></tr>'}
+        </tbody></table></div>
+      `;
     }
 
-    // OAM DASHBOARD
-    const myTls = tls.filter(t => t.oam_id === me.oam_id);
-    const tlIds = myTls.map(t => t.tl_id);
+    // OM DASHBOARD
+    const tot = reqs.length;
+    const approvedReqs = reqs.filter(r => r.status === 'approved');
+    const liability = approvedReqs.reduce((s,r) => s + +r.amount, 0);
     
-    // Filter requests down to only those belonging to this OAM's TLs
-    const myReqs = reqs.filter(r => tlIds.includes(r.agent_team_tl_id));
-    
-    const approved = myReqs.filter(r => r.status === 'approved').length;
-    const totalDecided = myReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
-    const liability = myReqs.filter(r => r.status === 'approved').reduce((s,r) => s + +r.amount, 0);
-    
-    // Issues for follow-up
-    const issues = myReqs.filter(r => ['rejected', 'expired'].includes(r.status));
+    // Group by OAM
+    const oamRollup = {};
+    reqs.forEach(r => {
+      if (!r.oam_id) return;
+      if (!oamRollup[r.oam_id]) oamRollup[r.oam_id] = { total: 0, approved: 0, liability: 0 };
+      oamRollup[r.oam_id].total++;
+      if (r.status === 'approved') {
+        oamRollup[r.oam_id].approved++;
+        oamRollup[r.oam_id].liability += +r.amount;
+      }
+    });
 
-    // Build the TL rollup table
-    const tlRollup = myTls.map(t => {
-      const tlReqs = myReqs.filter(r => r.agent_team_tl_id === t.tl_id);
-      const tlApproved = tlReqs.filter(r => r.status === 'approved').length;
-      const tlDecided = tlReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
-      const rate = tlDecided > 0 ? Math.round((tlApproved / tlDecided) * 100) + '%' : '—';
-      return `<tr>
-        <td>${esc(t.name)} (${esc(t.tl_id)})</td>
-        <td>${tlReqs.length}</td>
-        <td>${rate}</td>
-      </tr>`;
-    }).join('');
+    const oamRows = Object.keys(oamRollup).map(oamId => `
+      <tr>
+        <td>OAM ID: ${esc(oamId)}</td>
+        <td>${oamRollup[oamId].total}</td>
+        <td>${oamRollup[oamId].approved}</td>
+        <td>${fmt(oamRollup[oamId].liability)}</td>
+      </tr>
+    `).join('');
+
+    const highValue = approvedReqs.sort((a,b) => b.amount - a.amount).slice(0, 10);
 
     return `
       <div class="kp">
-        <div><b>${myTls.length}</b><span>TLs in your remit</span></div>
-        <div><b>${myReqs.length}</b><span>Total requests</span></div>
-        <div><b>${totalDecided > 0 ? Math.round((approved/totalDecided)*100) : 0}%</b><span>Approval rate</span></div>
-        <div><b>${fmt(liability)}</b><span>Approved Liability</span></div>
+        <div><b>${tot}</b><span>Total Requests</span></div>
+        <div><b>${approvedReqs.length}</b><span>Approved</span></div>
+        <div><b>${fmt(liability)}</b><span>Campaign Liability</span></div>
       </div>
 
-      <h2>TL Rollup</h2>
+      <h2>OAM Rollup</h2>
       <div class="tw"><table><thead><tr>
-        <th>Team Leader</th><th>Requests</th><th>Approval Rate</th>
+        <th>Operations Assistant Manager</th><th>Total Requests</th><th>Approved</th><th>Total Liability</th>
       </tr></thead><tbody>
-        ${tlRollup || '<tr><td colspan="3" class="mu">No TLs found in your remit.</td></tr>'}
+        ${oamRows || '<tr><td colspan="4" class="mu">No data yet.</td></tr>'}
       </tbody></table></div>
 
-      <h2>Issues for follow-up (Rejected / Expired)</h2>
+      <h2>Top 10 High-Value Approvals</h2>
       <div class="tw"><table><thead><tr>
-        <th>Request</th><th>Agent</th><th>TL</th><th>Amount</th><th>Status</th><th>Reason</th>
+        <th>Request</th><th>Agent</th><th>OAM ID</th><th>Amount</th><th>When</th>
       </tr></thead><tbody>
-        ${issues.map(r => `<tr>
+        ${highValue.map(r => `<tr>
           <td>${r.request_id}</td>
           <td>${esc(r.agent_id)}</td>
-          <td>${esc(r.agent_team_tl_id)}</td>
-          <td>${r.currency} ${fmt(r.amount)}</td>
-          <td><span class="pill s-${r.status}">${r.status}</span></td>
-          <td>${esc(r.rejection_reason || 'No reason provided')}</td>
-        </tr>`).join('') || '<tr><td colspan="6" class="mu">No issues found! Great job.</td></tr>'}
+          <td>${esc(r.oam_id)}</td>
+          <td><b>${r.currency} ${fmt(r.amount)}</b></td>
+          <td>${dt(r.created_at)}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="mu">No approved requests yet.</td></tr>'}
       </tbody></table></div>
     `;
   }
