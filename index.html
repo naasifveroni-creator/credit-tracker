@@ -112,7 +112,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const { data: types } = await sb.from('credit_types').select('*').eq('active', true);
     creditTypes = types || [];
 
-    // Fetch TLs and OAMs for relevant roles
     if (['oam', 'om', 'admin', 'qa', 'trainer'].includes(me.role)) {
       const { data: tlData } = await sb.from('tls').select('*');
       tls = tlData || [];
@@ -227,7 +226,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
   }
 
-  // ============ AGENT & TL VIEWS (Unchanged) ============
+  // ============ AGENT & TL VIEWS ============
   function viewAgentRequest() {
     let opts = '';
     if (creditTypes.length > 0) {
@@ -394,7 +393,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
-    // --- SHARED DASHBOARD FOR OAM, QA, TRAINER ---
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       const myTls = tls.filter(t => t.oam_id === me.oam_id || me.role !== 'oam');
       const tlIds = myTls.map(t => t.tl_id);
@@ -449,7 +447,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `;
     }
 
-    // --- OM DASHBOARD (DRILL DOWN ENABLED) ---
     if (drillDown && drillDown.level === 'tl') {
       const tlReqs = reqs.filter(r => r.agent_team_tl_id === drillDown.id);
       const tlObj = tls.find(t => t.tl_id === drillDown.id);
@@ -693,7 +690,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     await refresh();
   };
 
-  // ============ ADMIN VIEWS (Unchanged) ============
+  // ============ ADMIN VIEWS ============
   function viewConfig() {
     const cfg = adminData.config;
     
