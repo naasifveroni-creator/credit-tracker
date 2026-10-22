@@ -219,7 +219,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
   }
 
-  // ============ AGENT & TL VIEWS (Unchanged) ============
+  // ============ AGENT & TL VIEWS ============
   function viewAgentRequest() {
     let opts = '';
     if (creditTypes.length > 0) {
@@ -234,7 +234,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     <div class="card">
       <h3>New customer credit request</h3>
       <div class="row">
-        <label>Customer ref (PNR / booking / case)<input id="fref" placeholder="e.g. PNR-ABC123"></label>
+        <label>Customer ref (OmniPro / Axis)<input id="fref" placeholder="e.g. Case-12345"></label>
         <label>Type<select id="ftype">${opts}</select></label>
         <label>Amount<input id="famt" type="number" min="1" style="width:110px"></label>
         <label>Currency<select id="fcur"><option>USD</option></select></label>
@@ -275,6 +275,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <div class="meta"><b>${r.request_id}</b><span>${esc(r.customer_reference)}</span>
         <span>${r.currency} ${fmt(r.amount)}</span><span class="pill s-${r.status}">${r.status}</span>
         <span>${dt(r.created_at)}</span></div>
+        ${r.approved_by_tl_id ? `<div class="mu" style="font-size:12px;margin-top:4px">Actioned by TL: <b>${esc(r.approved_by_tl_id)}</b></div>` : ''}
         ${r.decision_notes ? '<div class="mu" style="font-size:12px;margin-top:4px">TL Notes: '+esc(r.decision_notes)+'</div>' : ''}
         ${r.rejection_reason ? '<div class="mu" style="font-size:12px;margin-top:4px;color:var(--ac)">Reason: '+esc(r.rejection_reason)+'</div>' : ''}
       </div>`).join('') || '<p class="mu">No requests yet.</p>';
@@ -366,9 +367,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <div class="req">
         <div class="meta">
           <b>${r.request_id}</b>
-          <span>${esc(r.agent_id)}</span>
+          <span>Agent: ${esc(r.agent_id)}</span>
           <span>${r.currency} ${fmt(r.amount)}</span>
           <span class="pill s-${r.status}">${r.status}</span>
+        </div>
+        <div class="meta" style="margin-top:6px; font-size:12px;">
+          <span>Agent's assigned TL: <b>${esc(r.agent_team_tl_id)}</b></span>
+          <span>Actioned by TL: <b style="color:var(--ok)">${esc(r.approved_by_tl_id || 'N/A')}</b></span>
         </div>
         <div class="notes">${esc(r.reason_notes||'')}</div>
         ${r.decision_notes ? '<div class="mu" style="font-size:12px;margin-top:4px">TL Notes: '+esc(r.decision_notes)+'</div>' : ''}
@@ -381,6 +386,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
+    // --- OAM DASHBOARD ---
     if (me.role === 'oam') {
       const myTls = tls.filter(t => t.oam_id === me.oam_id);
       const tlIds = myTls.map(t => t.tl_id);
@@ -390,6 +396,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       const totalDecided = myReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
       const liability = myReqs.filter(r => r.status === 'approved').reduce((s,r) => s + +r.amount, 0);
       const issues = myReqs.filter(r => ['rejected', 'expired'].includes(r.status));
+
+      const crossTlReqs = myReqs.filter(r => r.status === 'approved' && r.approved_by_tl_id && r.approved_by_tl_id !== r.agent_team_tl_id);
 
       const tlRollup = myTls.map(t => {
         const tlReqs = myReqs.filter(r => r.agent_team_tl_id === t.tl_id);
@@ -418,22 +426,39 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           ${tlRollup || '<tr><td colspan="3" class="mu">No TLs found in your remit.</td></tr>'}
         </tbody></table></div>
 
+        <h2>Cross-TL Approvals (Coverage)</h2>
+        <div class="tw"><table><thead><tr>
+          <th>Request</th><th>Agent</th><th>Agent's TL</th><th>Actioned By</th><th>Amount</th>
+        </tr></thead><tbody>
+          ${crossTlReqs.map(r => `<tr>
+            <td>${r.request_id}</td>
+            <td>${esc(r.agent_id)}</td>
+            <td>${esc(r.agent_team_tl_id)}</td>
+            <td><b style="color:var(--ok)">${esc(r.approved_by_tl_id)}</b></td>
+            <td>${r.currency} ${fmt(r.amount)}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="mu">No cross-TL approvals yet. All requests actioned by assigned TLs.</td></tr>'}
+        </tbody></table></div>
+
         <h2>Issues for follow-up (Rejected / Expired)</h2>
         <div class="tw"><table><thead><tr>
-          <th>Request</th><th>Agent</th><th>TL</th><th>Amount</th><th>Status</th><th>Reason</th>
+          <th>Request</th><th>Agent</th><th>Agent's TL</th><th>Actioned By</th><th>Amount</th><th>Status</th><th>Reason</th>
         </tr></thead><tbody>
           ${issues.map(r => `<tr>
             <td>${r.request_id}</td>
             <td>${esc(r.agent_id)}</td>
             <td>${esc(r.agent_team_tl_id)}</td>
+            <td>${esc(r.approved_by_tl_id || '—')}</td>
             <td>${r.currency} ${fmt(r.amount)}</td>
             <td><span class="pill s-${r.status}">${r.status}</span></td>
             <td>${esc(r.rejection_reason || 'No reason provided')}</td>
-          </tr>`).join('') || '<tr><td colspan="6" class="mu">No issues found! Great job.</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="7" class="mu">No issues found! Great job.</td></tr>'}
         </tbody></table></div>
       `;
     }
 
+    // --- OM DASHBOARD (DRILL DOWN ENABLED) ---
+    
+    // 1. If we are drilled down into a specific TL
     if (drillDown && drillDown.level === 'tl') {
       const tlReqs = reqs.filter(r => r.agent_team_tl_id === drillDown.id);
       const tlObj = tls.find(t => t.tl_id === drillDown.id);
@@ -458,6 +483,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `;
     }
 
+    // 2. If we are drilled down into a specific OAM
     if (drillDown && drillDown.level === 'oam') {
       const oamTls = tls.filter(t => t.oam_id === drillDown.id);
       const oamObj = oams.find(o => o.oam_id === drillDown.id);
@@ -483,6 +509,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `;
     }
 
+    // 3. The Top-Level OM Dashboard
     const tot = reqs.length;
     const approvedReqs = reqs.filter(r => r.status === 'approved');
     const liability = approvedReqs.reduce((s,r) => s + +r.amount, 0);
@@ -502,6 +529,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }).join('');
 
     const highValue = approvedReqs.sort((a,b) => b.amount - a.amount).slice(0, 10);
+    const systemCrossTlReqs = approvedReqs.filter(r => r.approved_by_tl_id && r.approved_by_tl_id !== r.agent_team_tl_id);
 
     return `
       <div class="kp">
@@ -515,6 +543,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <th>Operations Assistant Manager</th><th>Total Requests</th><th>Approved</th><th>Total Liability</th><th>Action</th>
       </tr></thead><tbody>
         ${oamRows || '<tr><td colspan="5" class="mu">No data yet.</td></tr>'}
+      </tbody></table></div>
+
+      <h2>Cross-TL Approvals (System Wide)</h2>
+      <div class="tw"><table><thead><tr>
+        <th>Request</th><th>Agent</th><th>Agent's TL</th><th>Actioned By</th><th>Amount</th><th>When</th>
+      </tr></thead><tbody>
+        ${systemCrossTlReqs.map(r => `<tr>
+          <td>${r.request_id}</td>
+          <td>${esc(r.agent_id)}</td>
+          <td>${esc(r.agent_team_tl_id)}</td>
+          <td><b style="color:var(--ok)">${esc(r.approved_by_tl_id)}</b></td>
+          <td>${r.currency} ${fmt(r.amount)}</td>
+          <td>${dt(r.created_at)}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="mu">No cross-TL approvals yet. All requests actioned by assigned TLs.</td></tr>'}
       </tbody></table></div>
 
       <h2>Top 10 High-Value Approvals</h2>
