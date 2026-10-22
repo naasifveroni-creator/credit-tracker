@@ -128,7 +128,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     subscribe();
     
     setInterval(() => {
-      // Pause auto-refresh if ANY form is currently open so it doesn't wipe data
       if (!document.getElementById('fref') && !document.getElementById('qaInsights') && !document.getElementById('coachNotes')) {
         refresh();
       }
@@ -394,10 +393,19 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
+    // --- SHARED DASHBOARD FOR OAM, QA, TRAINER ---
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
-      const myTls = tls.filter(t => t.oam_id === me.oam_id || me.role !== 'oam');
+      let myTls = [];
+      
+      // If OAM, restrict to their TLs. If QA/Trainer, show ALL TLs.
+      if (me.role === 'oam') {
+        myTls = tls.filter(t => t.oam_id === me.oam_id);
+      } else {
+        myTls = tls; // QA and Trainer see everyone
+      }
+      
       const tlIds = myTls.map(t => t.tl_id);
-      const myReqs = reqs.filter(r => tlIds.length === 0 || tlIds.includes(r.agent_team_tl_id));
+      const myReqs = reqs.filter(r => tlIds.includes(r.agent_team_tl_id));
       
       const approved = myReqs.filter(r => r.status === 'approved').length;
       const totalDecided = myReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
@@ -561,8 +569,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   // ============ QA & TRAINER VIEWS ============
-  
-  // NEW: Unified Review History
   function renderReviewHistory() {
     if (qaReviews.length === 0) return '';
     
