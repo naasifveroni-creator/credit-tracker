@@ -128,7 +128,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     subscribe();
     
     setInterval(() => {
-      // THE FIX: Pause auto-refresh if ANY form is currently open so it doesn't wipe data
+      // Pause auto-refresh if ANY form is currently open so it doesn't wipe data
       if (!document.getElementById('fref') && !document.getElementById('qaInsights') && !document.getElementById('coachNotes')) {
         refresh();
       }
@@ -194,7 +194,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         .order('created_at', { ascending:false }).limit(500);
       reqs = data || [];
       
-      const { data: qaData } = await sb.from('qa_reviews').select('*');
+      const { data: qaData } = await sb.from('qa_reviews').select('*').order('created_at', {ascending: false});
       qaReviews = qaData || [];
     }
     
@@ -561,6 +561,30 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   // ============ QA & TRAINER VIEWS ============
+  
+  // NEW: Unified Review History
+  function renderReviewHistory() {
+    if (qaReviews.length === 0) return '';
+    
+    return `
+      <h2 style="margin-top:40px; border-top: 2px solid var(--bd); padding-top: 20px;">Actioned Review History</h2>
+      <p class="mu">Track the full lifecycle of QA fails and coaching actions.</p>
+      <div class="tw"><table><thead><tr>
+        <th>Request ID</th><th>QA Insight</th><th>QA Result</th><th>Trainer Status</th><th>Trainer Notes</th><th>OAM Status</th><th>OAM Notes</th>
+      </tr></thead><tbody>
+        ${qaReviews.map(q => `<tr>
+          <td><b>${q.request_id}</b></td>
+          <td>${esc(q.qa_insights)}</td>
+          <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
+          <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
+          <td>${esc(q.trainer_notes || '—')}</td>
+          <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
+          <td>${esc(q.oam_notes || '—')}</td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    `;
+  }
+
   function viewQAQueue() {
     const pendingQA = reqs.filter(r => ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id));
     
@@ -580,6 +604,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
+      
+      ${renderReviewHistory()}
     `;
   }
 
@@ -643,13 +669,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         ${fails.map(q => `<tr>
           <td>${q.request_id}</td>
           <td>${esc(q.qa_insights)}</td>
-          <td><span class="pill s-${q.trainer_status === 'pending' ? 'pending' : 'approved'}">${q.trainer_status}</span></td>
-          <td><span class="pill s-${q.oam_status === 'pending' ? 'pending' : 'approved'}">${q.oam_status}</span></td>
+          <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
+          <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
           <td><button class="b" onclick="openCoachingAction('${q.review_id}')">Action</button></td>
         </tr>`).join('') || '<tr><td colspan="5" class="mu">No QA fails requiring action.</td></tr>'}
       </tbody></table></div>
       
       <div id="coachingForm"></div>
+
+      ${renderReviewHistory()}
     `;
   }
 
