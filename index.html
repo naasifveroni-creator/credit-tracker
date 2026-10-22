@@ -238,6 +238,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <label>Type<select id="ftype">${opts}</select></label>
         <label>Amount<input id="famt" type="number" min="1" style="width:110px"></label>
         <label>Currency<select id="fcur"><option>USD</option></select></label>
+        <label>Reason<select id="frc">
           <option>ServiceFailure</option><option>Delay</option><option>LostBag</option>
           <option>Misconnect</option><option>Goodwill</option><option>PolicyException</option><option>Other</option>
         </select></label>
@@ -534,7 +535,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   function viewConfig() {
     const cfg = adminData.config;
     
-    // Function to save config
     window.saveConfig = async () => {
       const { error } = await sb.from('campaign_config').upsert({
         campaign_id: 'CMP001',
@@ -546,7 +546,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (error) alert(error.message); else alert('Config saved!');
     };
 
-    // Staff Directory (Add/Remove)
     window.addStaff = async (type) => {
       if (type === 'tl') {
         await sb.from('tls').upsert({
@@ -579,7 +578,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       render();
     };
 
-    // Dropdowns
     const omOpts = ['RAMCHANDRA NAIDOO', 'CHARLENE EBRAHIM'].map(o => `<option value="${o}">${o}</option>`).join('');
     const oamOpts = oams.map(o => `<option value="${o.oam_id}">${esc(o.name)}</option>`).join('');
     const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
@@ -598,7 +596,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
       <h2>Staff Directory</h2>
       
-      <!-- Add OAM -->
       <div class="card">
         <h3>Add OAM</h3>
         <div class="row">
@@ -619,7 +616,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         </tbody></table></div>
       </div>
 
-      <!-- Add TL -->
       <div class="card">
         <h3>Add TL</h3>
         <div class="row">
@@ -641,7 +637,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         </tbody></table></div>
       </div>
 
-      <!-- Add Agent -->
       <div class="card">
         <h3>Add Agent</h3>
         <div class="row">
