@@ -234,7 +234,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     <div class="card">
       <h3>New customer credit request</h3>
       <div class="row">
-        <label>Customer ref (OmniPro / Axis)<input id="fref" placeholder="e.g. Case-12345"></label>
+        <label>Customer ref (PNR / booking / case)<input id="fref" placeholder="e.g. PNR-ABC123"></label>
         <label>Type<select id="ftype">${opts}</select></label>
         <label>Amount<input id="famt" type="number" min="1" style="width:110px"></label>
         <label>Currency<select id="fcur"><option>USD</option></select></label>
@@ -457,8 +457,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
 
     // --- OM DASHBOARD (DRILL DOWN ENABLED) ---
-    
-    // 1. If we are drilled down into a specific TL
     if (drillDown && drillDown.level === 'tl') {
       const tlReqs = reqs.filter(r => r.agent_team_tl_id === drillDown.id);
       const tlObj = tls.find(t => t.tl_id === drillDown.id);
@@ -483,7 +481,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `;
     }
 
-    // 2. If we are drilled down into a specific OAM
     if (drillDown && drillDown.level === 'oam') {
       const oamTls = tls.filter(t => t.oam_id === drillDown.id);
       const oamObj = oams.find(o => o.oam_id === drillDown.id);
@@ -509,7 +506,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       `;
     }
 
-    // 3. The Top-Level OM Dashboard
     const tot = reqs.length;
     const approvedReqs = reqs.filter(r => r.status === 'approved');
     const liability = approvedReqs.reduce((s,r) => s + +r.amount, 0);
