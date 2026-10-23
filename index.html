@@ -401,8 +401,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
+    // --- SHARED DASHBOARD FOR OAM, QA, TRAINER ---
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       let myTls = [];
+      
       if (me.role === 'oam') {
         myTls = tls.filter(t => t.oam_id === me.oam_id);
       } else {
@@ -818,8 +820,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewCoachingQueue() {
-    const pendingFails = qaReviews.filter(q => {
-      if (q.qa_result !== 'fail') return false;
+    // UPDATED: Now shows BOTH Passes and Fails that are pending action for the specific role
+    const pendingActions = qaReviews.filter(q => {
       if (me.role === 'trainer') return q.trainer_status === 'pending';
       if (me.role === 'oam') return q.oam_status === 'pending';
       return true;
@@ -827,19 +829,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     
     return `
       <h2>Coaching & Action Queue</h2>
-      <p class="mu">Review QA fails and mark them as actioned or coached.</p>
+      <p class="mu">Review QA outcomes and mark them as actioned or coached.</p>
       
       <div class="tw"><table><thead><tr>
-        <th>Request ID</th><th>Severity</th><th>QA Insight</th><th>Trainer Status</th><th>OAM Status</th><th>Action</th>
+        <th>Request ID</th><th>QA Result</th><th>Severity</th><th>QA Insight</th><th>Trainer Status</th><th>OAM Status</th><th>Action</th>
       </tr></thead><tbody>
-        ${pendingFails.map(q => `<tr>
+        ${pendingActions.map(q => `<tr>
           <td>${q.request_id}</td>
-          <td><span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span></td>
+          <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
+          <td>${q.qa_result === 'pass' ? '—' : `<span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span>`}</td>
           <td>${esc(q.qa_insights)}</td>
           <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
           <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
           <td><button class="b" onclick="openCoachingAction('${q.review_id}')">Action</button></td>
-        </tr>`).join('') || '<tr><td colspan="6" class="mu">You have no pending actions.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="mu">You have no pending actions.</td></tr>'}
       </tbody></table></div>
       
       <div id="coachingForm"></div>
