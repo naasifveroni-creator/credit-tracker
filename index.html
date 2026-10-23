@@ -78,7 +78,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
-  // QA Filter State
   let qaFilterAgent = '';
   let qaFilterTl = '';
   let qaFilterReason = '';
@@ -402,10 +401,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
-    // --- SHARED DASHBOARD FOR OAM, QA, TRAINER ---
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       let myTls = [];
-      
       if (me.role === 'oam') {
         myTls = tls.filter(t => t.oam_id === me.oam_id);
       } else {
@@ -625,7 +622,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         ${qaReviews.map(q => `<tr>
           <td><b>${q.request_id}</b></td>
           <td>${esc(q.qa_insights)}</td>
-          <td><span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span></td>
+          <td>${q.qa_result === 'pass' ? '<span class="pill s-approved">PASS</span>' : `<span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span>`}</td>
           <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
           <td style="font-size:11px;">
             ${q.checked_justification ? '✅' : '❌'} Justification <br>
@@ -702,7 +699,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <div class="notes">${esc(r.reason_notes)}</div>
         
         <div class="row" style="margin-top:10px;">
-          <label>QA Result<select id="qaResult">
+          <label>QA Result<select id="qaResult" onchange="toggleSeverity()">
             <option value="pass">PASS (Aligned with policy)</option>
             <option value="fail">FAIL (Policy Violation / Issue)</option>
           </select></label>
@@ -714,6 +711,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             <option>System Error</option>
           </select></label>
           <label>Severity<select id="qaSeverity">
+            <option value="none">None (Pass)</option>
             <option value="minor">Minor (Standard Training)</option>
             <option value="major">Major (Needs Coaching)</option>
             <option value="critical">Critical (OAM Intervention)</option>
@@ -744,6 +742,16 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     `;
   };
 
+  window.toggleSeverity = () => {
+    const res = $('#qaResult').value;
+    const sev = $('#qaSeverity');
+    if (res === 'pass') {
+      sev.value = 'none';
+    } else if (sev.value === 'none') {
+      sev.value = 'minor';
+    }
+  };
+
   window.submitQAReview = async (requestId) => {
     const res = $('#qaResult').value;
     const cat = $('#qaCategory').value;
@@ -772,9 +780,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     await refresh();
   };
 
-  // --- NEW: Agent Scorecards ---
   function viewAgentScorecards() {
-    // Group QA reviews by Agent to calculate pass rates
     const agentStats = {};
     
     qaReviews.forEach(q => {
