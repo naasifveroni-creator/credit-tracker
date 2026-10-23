@@ -72,6 +72,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const fmt = n => Math.round(n||0).toLocaleString();
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+  const dtd = s => s ? new Date(s).toLocaleDateString() : '—';
 
   let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], qaReviews = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
@@ -80,6 +81,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   // QA Filter State
   let qaFilterAgent = '';
   let qaFilterTl = '';
+  let qaFilterReason = '';
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config', qa:'QA Queue', trainer:'Coaching Queue' };
   const TABS = {
@@ -89,7 +91,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     om: ['Dashboard'],
     admin: ['Config','Roster','Hierarchy','Anomalies','Audit'],
     qa: ['Dashboard', 'QA Queue'],
-    trainer: ['Dashboard', 'Coaching Queue']
+    trainer: ['Dashboard', 'Agent Scorecards', 'Coaching Queue']
   };
 
   window.signIn = async () => {
@@ -227,7 +229,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       'Dashboard': viewDash,
       'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Anomalies': viewAnoms, 'Audit': viewAudit,
       'QA Queue': viewQAQueue,
-      'Coaching Queue': viewCoachingQueue
+      'Coaching Queue': viewCoachingQueue,
+      'Agent Scorecards': viewAgentScorecards
     };
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
   }
@@ -578,19 +581,21 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.applyQaFilter = () => {
     qaFilterAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
     qaFilterTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
+    qaFilterReason = $('#qaFilterReason') ? $('#qaFilterReason').value : '';
     render();
   };
 
   window.exportHistoryToCSV = () => {
     if (qaReviews.length === 0) return alert('No history to export.');
     
-    const headers = ['Request ID', 'QA Insight', 'QA Result', 'Check: Justification', 'Check: Policy', 'Check: PNR', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes'];
+    const headers = ['Request ID', 'QA Insight', 'QA Result', 'Severity', 'Check: Justification', 'Check: Policy', 'Check: PNR', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes', 'Coaching Date', 'Coaching Type'];
     const rows = qaReviews.map(q => [
-      q.request_id, q.qa_insights, q.qa_result, 
+      q.request_id, q.qa_insights, q.qa_result, q.severity,
       q.checked_justification ? 'Yes' : 'No',
       q.checked_policy ? 'Yes' : 'No',
       q.checked_pnr ? 'Yes' : 'No',
-      q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || ''
+      q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || '',
+      q.coaching_date || '', q.coaching_type || ''
     ]);
     
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -615,19 +620,23 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       </div>
       <p class="mu">Track the full lifecycle of QA fails and coaching actions.</p>
       <div class="tw"><table><thead><tr>
-        <th>Request ID</th><th>QA Insight</th><th>QA Result</th><th>Checklist (Just/Pol/PNR)</th><th>Trainer Status</th><th>Trainer Notes</th><th>OAM Status</th><th>OAM Notes</th>
+        <th>Request ID</th><th>QA Insight</th><th>Severity</th><th>QA Result</th><th>Checklist</th><th>Trainer Status</th><th>Coach Details</th><th>OAM Status</th><th>OAM Notes</th>
       </tr></thead><tbody>
         ${qaReviews.map(q => `<tr>
           <td><b>${q.request_id}</b></td>
           <td>${esc(q.qa_insights)}</td>
+          <td><span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span></td>
           <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
-          <td>
+          <td style="font-size:11px;">
             ${q.checked_justification ? '✅' : '❌'} Justification <br>
             ${q.checked_policy ? '✅' : '❌'} Policy <br>
             ${q.checked_pnr ? '✅' : '❌'} PNR
           </td>
           <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
-          <td>${esc(q.trainer_notes || '—')}</td>
+          <td style="font-size:11px;">
+            ${q.coaching_date ? '📅 ' + dtd(q.coaching_date) + '<br>' : ''}
+            ${q.coaching_type ? '📋 ' + q.coaching_type : (q.trainer_notes || '—')}
+          </td>
           <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
           <td>${esc(q.oam_notes || '—')}</td>
         </tr>`).join('')}
@@ -640,10 +649,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
       const matchesAgent = qaFilterAgent === '' || r.agent_id.toLowerCase().includes(qaFilterAgent.toLowerCase());
       const matchesTl = qaFilterTl === '' || r.approved_by_tl_id === qaFilterTl;
-      return isPending && matchesAgent && matchesTl;
+      const matchesReason = qaFilterReason === '' || r.reason_code === qaFilterReason;
+      return isPending && matchesAgent && matchesTl && matchesReason;
     });
     
-    const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
+    const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${qaFilterTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
 
     return `
       <h2>QA Review Queue</h2>
@@ -654,20 +664,28 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option value="">-- All TLs --</option>
           ${tlOpts}
         </select></label>
-        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; render()">Clear</button>
+        <label>Filter by Reason<select id="qaFilterReason" onchange="applyQaFilter()">
+          <option value="">-- All Reasons --</option>
+          <option ${qaFilterReason === 'Waiver' ? 'selected' : ''}>Waiver</option>
+          <option ${qaFilterReason === 'Goodwill' ? 'selected' : ''}>Goodwill</option>
+          <option ${qaFilterReason === 'ServiceFailure' ? 'selected' : ''}>ServiceFailure</option>
+          <option ${qaFilterReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
+        </select></label>
+        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; qaFilterReason=''; render()">Clear</button>
       </div>
 
       <div class="tw"><table><thead><tr>
-        <th>Request</th><th>Agent</th><th>Actioned By</th><th>Amount</th><th>Status</th><th>Action</th>
+        <th>Request</th><th>Agent</th><th>Actioned By</th><th>Amount</th><th>Reason</th><th>Status</th><th>Action</th>
       </tr></thead><tbody>
         ${pendingQA.map(r => `<tr>
           <td>${r.request_id}</td>
           <td>${esc(r.agent_id)}</td>
           <td>${esc(r.approved_by_tl_id || '—')}</td>
           <td>${r.currency} ${fmt(r.amount)}</td>
+          <td>${esc(r.reason_code)}</td>
           <td><span class="pill s-${r.status}">${r.status}</span></td>
           <td><button class="b" onclick="openQAReview('${r.request_id}')">Review</button></td>
-        </tr>`).join('') || '<tr><td colspan="6" class="mu">No pending QA reviews found with these filters.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found with these filters.</td></tr>'}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
@@ -694,6 +712,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             <option>Policy Violation</option>
             <option>Favoritism/Risk</option>
             <option>System Error</option>
+          </select></label>
+          <label>Severity<select id="qaSeverity">
+            <option value="minor">Minor (Standard Training)</option>
+            <option value="major">Major (Needs Coaching)</option>
+            <option value="critical">Critical (OAM Intervention)</option>
           </select></label>
         </div>
         
@@ -725,6 +748,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const res = $('#qaResult').value;
     const cat = $('#qaCategory').value;
     const ins = $('#qaInsights').value;
+    const sev = $('#qaSeverity').value;
     
     const chkJust = $('#qaCheckJust').checked;
     const chkPol = $('#qaCheckPolicy').checked;
@@ -736,6 +760,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       qa_result: res,
       error_category: cat,
       qa_insights: ins,
+      severity: sev,
       checked_justification: chkJust,
       checked_policy: chkPol,
       checked_pnr: chkPnr
@@ -746,6 +771,45 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#qaReviewForm').innerHTML = '';
     await refresh();
   };
+
+  // --- NEW: Agent Scorecards ---
+  function viewAgentScorecards() {
+    // Group QA reviews by Agent to calculate pass rates
+    const agentStats = {};
+    
+    qaReviews.forEach(q => {
+      const req = reqs.find(r => r.request_id === q.request_id);
+      if (!req) return;
+      
+      const agId = req.agent_id;
+      if (!agentStats[agId]) agentStats[agId] = { total: 0, pass: 0, fail: 0, agent_name: agId };
+      agentStats[agId].total++;
+      if (q.qa_result === 'pass') agentStats[agId].pass++;
+      if (q.qa_result === 'fail') agentStats[agId].fail++;
+    });
+
+    const sortedAgents = Object.values(agentStats).sort((a, b) => b.fail - a.fail);
+
+    return `
+      <h2>Agent Scorecards</h2>
+      <p class="mu">Identify agents who need coaching intervention based on QA Pass/Fail ratios.</p>
+      
+      <div class="tw"><table><thead><tr>
+        <th>Agent ID</th><th>Total QA Reviews</th><th>Passes</th><th>Fails</th><th>Actionable Status</th>
+      </tr></thead><tbody>
+        ${sortedAgents.map(a => {
+          const isFlagged = a.fail >= 3;
+          return `<tr>
+            <td><b>${esc(a.agent_name)}</b></td>
+            <td>${a.total}</td>
+            <td><span style="color:var(--ok)">${a.pass}</span></td>
+            <td><span style="color:var(--ac)">${a.fail}</span></td>
+            <td>${isFlagged ? '<span class="pill s-rejected" style="font-weight:bold;">🚩 Needs Coaching</span>' : '<span class="pill s-approved">On Track</span>'}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="5" class="mu">No QA reviews logged yet.</td></tr>'}
+      </tbody></table></div>
+    `;
+  }
 
   function viewCoachingQueue() {
     const pendingFails = qaReviews.filter(q => {
@@ -760,15 +824,16 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <p class="mu">Review QA fails and mark them as actioned or coached.</p>
       
       <div class="tw"><table><thead><tr>
-        <th>Request ID</th><th>QA Insight</th><th>Trainer Status</th><th>OAM Status</th><th>Action</th>
+        <th>Request ID</th><th>Severity</th><th>QA Insight</th><th>Trainer Status</th><th>OAM Status</th><th>Action</th>
       </tr></thead><tbody>
         ${pendingFails.map(q => `<tr>
           <td>${q.request_id}</td>
+          <td><span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span></td>
           <td>${esc(q.qa_insights)}</td>
           <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
           <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
           <td><button class="b" onclick="openCoachingAction('${q.review_id}')">Action</button></td>
-        </tr>`).join('') || '<tr><td colspan="5" class="mu">You have no pending actions.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="6" class="mu">You have no pending actions.</td></tr>'}
       </tbody></table></div>
       
       <div id="coachingForm"></div>
@@ -789,6 +854,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             <option value="reviewed">Reviewed</option>
             <option value="actioned">Actioned / Coached</option>
           </select></label>
+          ${me.role === 'trainer' ? `
+            <label>Coaching Date<input type="date" id="coachDate" style="width:140px;"></label>
+            <label>Coaching Type<select id="coachType">
+              <option value="">-- Select --</option>
+              <option>1-on-1</option>
+              <option>Team Huddle</option>
+              <option>Refresher Training</option>
+            </select></label>
+          ` : ''}
         </div>
         <label style="margin-top:10px;display:block">Trainer/OAM Notes
           <textarea id="coachNotes" placeholder="e.g. 1-on-1 completed with TL. Sent updated SOP."></textarea>
@@ -802,9 +876,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.submitCoachingAction = async (reviewId) => {
     const stat = $('#coachStatus').value;
     const notes = $('#coachNotes').value;
+    const cDate = $('#coachDate') ? $('#coachDate').value : null;
+    const cType = $('#coachType') ? $('#coachType').value : null;
     
     const updateData = me.role === 'trainer' 
-      ? { trainer_status: stat, trainer_notes: notes }
+      ? { trainer_status: stat, trainer_notes: notes, coaching_date: cDate || null, coaching_type: cType || null }
       : { oam_status: stat, oam_notes: notes };
       
     const { error } = await sb.from('qa_reviews').update(updateData).eq('review_id', reviewId);
