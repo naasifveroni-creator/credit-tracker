@@ -397,7 +397,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       let myTls = [];
       
-      // If OAM, restrict to their TLs. If QA/Trainer, show ALL TLs.
       if (me.role === 'oam') {
         myTls = tls.filter(t => t.oam_id === me.oam_id);
       } else {
@@ -663,7 +662,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   };
 
   function viewCoachingQueue() {
-    const fails = qaReviews.filter(q => q.qa_result === 'fail');
+    // Only show fails that YOUR specific role hasn't actioned yet
+    const pendingFails = qaReviews.filter(q => {
+      if (q.qa_result !== 'fail') return false;
+      if (me.role === 'trainer') return q.trainer_status === 'pending';
+      if (me.role === 'oam') return q.oam_status === 'pending';
+      return true;
+    });
     
     return `
       <h2>Coaching & Action Queue</h2>
@@ -672,13 +677,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <div class="tw"><table><thead><tr>
         <th>Request ID</th><th>QA Insight</th><th>Trainer Status</th><th>OAM Status</th><th>Action</th>
       </tr></thead><tbody>
-        ${fails.map(q => `<tr>
+        ${pendingFails.map(q => `<tr>
           <td>${q.request_id}</td>
           <td>${esc(q.qa_insights)}</td>
           <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
           <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
           <td><button class="b" onclick="openCoachingAction('${q.review_id}')">Action</button></td>
-        </tr>`).join('') || '<tr><td colspan="5" class="mu">No QA fails requiring action.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="5" class="mu">You have no pending actions.</td></tr>'}
       </tbody></table></div>
       
       <div id="coachingForm"></div>
