@@ -40,6 +40,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 .req .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 #auth{max-width:380px;margin:80px auto;padding:24px;background:var(--cd);border:1px solid var(--bd);border-radius:10px}
 #auth input{width:100%;margin:6px 0 12px}
+.check-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.check-item input { width: 16px; height: 16px; }
 </style></head><body>
 
 <div id="auth" hidden>
@@ -74,6 +76,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], qaReviews = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
+  
+  // QA Filter State
+  let qaFilterAgent = '';
+  let qaFilterTl = '';
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config', qa:'QA Queue', trainer:'Coaching Queue' };
   const TABS = {
@@ -400,7 +406,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (me.role === 'oam') {
         myTls = tls.filter(t => t.oam_id === me.oam_id);
       } else {
-        myTls = tls; // QA and Trainer see everyone
+        myTls = tls; 
       }
       
       const tlIds = myTls.map(t => t.tl_id);
@@ -568,19 +574,58 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   // ============ QA & TRAINER VIEWS ============
+  
+  window.applyQaFilter = () => {
+    qaFilterAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
+    qaFilterTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
+    render();
+  };
+
+  window.exportHistoryToCSV = () => {
+    if (qaReviews.length === 0) return alert('No history to export.');
+    
+    const headers = ['Request ID', 'QA Insight', 'QA Result', 'Check: Justification', 'Check: Policy', 'Check: PNR', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes'];
+    const rows = qaReviews.map(q => [
+      q.request_id, q.qa_insights, q.qa_result, 
+      q.checked_justification ? 'Yes' : 'No',
+      q.checked_policy ? 'Yes' : 'No',
+      q.checked_pnr ? 'Yes' : 'No',
+      q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || ''
+    ]);
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers, ...rows].map(e => e.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "qa_review_history.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   function renderReviewHistory() {
     if (qaReviews.length === 0) return '';
     
     return `
-      <h2 style="margin-top:40px; border-top: 2px solid var(--bd); padding-top: 20px;">Actioned Review History</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:40px; border-top: 2px solid var(--bd); padding-top: 20px;">
+        <h2 style="margin:0;">Actioned Review History</h2>
+        <button class="s" onclick="exportHistoryToCSV()">⬇ Download CSV</button>
+      </div>
       <p class="mu">Track the full lifecycle of QA fails and coaching actions.</p>
       <div class="tw"><table><thead><tr>
-        <th>Request ID</th><th>QA Insight</th><th>QA Result</th><th>Trainer Status</th><th>Trainer Notes</th><th>OAM Status</th><th>OAM Notes</th>
+        <th>Request ID</th><th>QA Insight</th><th>QA Result</th><th>Checklist (Just/Pol/PNR)</th><th>Trainer Status</th><th>Trainer Notes</th><th>OAM Status</th><th>OAM Notes</th>
       </tr></thead><tbody>
         ${qaReviews.map(q => `<tr>
           <td><b>${q.request_id}</b></td>
           <td>${esc(q.qa_insights)}</td>
           <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
+          <td>
+            ${q.checked_justification ? '✅' : '❌'} Justification <br>
+            ${q.checked_policy ? '✅' : '❌'} Policy <br>
+            ${q.checked_pnr ? '✅' : '❌'} PNR
+          </td>
           <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
           <td>${esc(q.trainer_notes || '—')}</td>
           <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
@@ -591,10 +636,27 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewQAQueue() {
-    const pendingQA = reqs.filter(r => ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id));
+    const pendingQA = reqs.filter(r => {
+      const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
+      const matchesAgent = qaFilterAgent === '' || r.agent_id.toLowerCase().includes(qaFilterAgent.toLowerCase());
+      const matchesTl = qaFilterTl === '' || r.approved_by_tl_id === qaFilterTl;
+      return isPending && matchesAgent && matchesTl;
+    });
     
+    const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
+
     return `
       <h2>QA Review Queue</h2>
+      
+      <div class="card row" style="margin-bottom:12px; align-items:center;">
+        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(qaFilterAgent)}" oninput="applyQaFilter()" placeholder="Search Agent..."></label>
+        <label>Filter by TL<select id="qaFilterTl" onchange="applyQaFilter()">
+          <option value="">-- All TLs --</option>
+          ${tlOpts}
+        </select></label>
+        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; render()">Clear</button>
+      </div>
+
       <div class="tw"><table><thead><tr>
         <th>Request</th><th>Agent</th><th>Actioned By</th><th>Amount</th><th>Status</th><th>Action</th>
       </tr></thead><tbody>
@@ -605,7 +667,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <td>${r.currency} ${fmt(r.amount)}</td>
           <td><span class="pill s-${r.status}">${r.status}</span></td>
           <td><button class="b" onclick="openQAReview('${r.request_id}')">Review</button></td>
-        </tr>`).join('') || '<tr><td colspan="6" class="mu">No pending QA reviews.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="6" class="mu">No pending QA reviews found with these filters.</td></tr>'}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
@@ -620,6 +682,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
         <h3>Reviewing Request: ${r.request_id}</h3>
         <div class="notes">${esc(r.reason_notes)}</div>
+        
         <div class="row" style="margin-top:10px;">
           <label>QA Result<select id="qaResult">
             <option value="pass">PASS (Aligned with policy)</option>
@@ -633,7 +696,23 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             <option>System Error</option>
           </select></label>
         </div>
-        <label style="margin-top:10px;display:block">QA Insights / Feedback
+        
+        <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--bd);">
+          <div class="check-item">
+            <input type="checkbox" id="qaCheckJust">
+            <label for="qaCheckJust">Agent provided valid justification (50+ chars)</label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="qaCheckPolicy">
+            <label for="qaCheckPolicy">TL action aligned with the policy grid</label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="qaCheckPnr">
+            <label for="qaCheckPnr">PNR / Booking verified</label>
+          </div>
+        </div>
+
+        <label style="margin-top:14px;display:block">QA Insights / Feedback
           <textarea id="qaInsights" placeholder="Provide actionable feedback for the Trainer and OAM..."></textarea>
         </label>
         <p><button class="b" onclick="submitQAReview('${r.request_id}')">Submit Review</button> 
@@ -647,12 +726,19 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const cat = $('#qaCategory').value;
     const ins = $('#qaInsights').value;
     
+    const chkJust = $('#qaCheckJust').checked;
+    const chkPol = $('#qaCheckPolicy').checked;
+    const chkPnr = $('#qaCheckPnr').checked;
+    
     const { error } = await sb.from('qa_reviews').insert({
       request_id: requestId,
       qa_agent_id: me.person_id,
       qa_result: res,
       error_category: cat,
-      qa_insights: ins
+      qa_insights: ins,
+      checked_justification: chkJust,
+      checked_policy: chkPol,
+      checked_pnr: chkPnr
     });
     
     if (error) return alert(error.message);
@@ -662,7 +748,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   };
 
   function viewCoachingQueue() {
-    // Only show fails that YOUR specific role hasn't actioned yet
     const pendingFails = qaReviews.filter(q => {
       if (q.qa_result !== 'fail') return false;
       if (me.role === 'trainer') return q.trainer_status === 'pending';
