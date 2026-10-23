@@ -1170,11 +1170,52 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     render();
   };
 
+  window.bulkReassign = async () => {
+    const oldTlId = $('#bulkOldTl').value;
+    const newTlId = $('#bulkNewTl').value;
+    if (!oldTlId || !newTlId) return alert('Please select both TLs.');
+    if (oldTlId === newTlId) return alert('Cannot move a team to the same TL.');
+    
+    const { data: newTl } = await sb.from('tls').select('oam_id, om_id').eq('tl_id', newTlId).single();
+    if (!newTl) return alert('Invalid New TL');
+    
+    const { count, error } = await sb.from('agents')
+      .update({ tl_id: newTlId, oam_id: newTl.oam_id, om_id: newTl.om_id }, { count: 'exact' })
+      .eq('tl_id', oldTlId);
+      
+    if (error) {
+      alert('Error: ' + error.message);
+    } else {
+      alert(`Success! ${count} agents moved to the new TL.`);
+      const { data: agData } = await sb.from('agents').select('*'); allAgents = agData || [];
+      render();
+    }
+  };
+
   function viewHierarchy() {
     if (!adminSelectedOam) {
       const oamOpts = oams.map(o => `<option value="${o.oam_id}">${esc(o.name)} (${esc(o.oam_id)})</option>`).join('');
+      const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
+
       return `
         <h2>Manage Hierarchy</h2>
+        
+        <div class="card">
+          <h3>Bulk Team Reassignment</h3>
+          <p class="mu">Move all agents from one TL to another instantly.</p>
+          <div class="row">
+            <label>Current TL<select id="bulkOldTl">
+              <option value="">-- Select TL --</option>
+              ${tlOpts}
+            </select></label>
+            <label>New TL<select id="bulkNewTl">
+              <option value="">-- Select TL --</option>
+              ${tlOpts}
+            </select></label>
+            <button class="b" onclick="bulkReassign()">Move Team</button>
+          </div>
+        </div>
+
         <div class="card row">
           <label>Select an OAM to view their TLs<select onchange="selectAdminOam(this.value)">
             <option value="">-- Choose OAM --</option>
