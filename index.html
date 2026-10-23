@@ -208,7 +208,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       const { data: qaData } = await sb.from('qa_reviews').select('*').order('created_at', {ascending: false});
       qaReviews = qaData || [];
 
-      // Fetch Archive
       const { data: arcData } = await sb.from('archive_requests').select('*').order('created_at', {ascending: false});
       archivedReqs = arcData || [];
     }
@@ -249,13 +248,38 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   // ============ ARCHIVE VIEW ============
+  window.exportArchiveToCSV = () => {
+    const myArchive = me.role === 'agent' 
+      ? archivedReqs.filter(r => r.agent_id === me.person_id)
+      : archivedReqs;
+
+    if (myArchive.length === 0) return alert('No archive data to export.');
+
+    const headers = ['Request ID', 'Agent ID', 'TL ID', 'Amount', 'Currency', 'Reason', 'Status', 'Actioned By', 'Date'];
+    const rows = myArchive.map(r => [r.request_id, r.agent_id, r.agent_team_tl_id, r.amount, r.currency, r.reason_code, r.status, r.approved_by_tl_id || '', r.created_at]);
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers, ...rows].map(e => e.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `archive_export_${me.role}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   function viewArchive() {
     const myArchive = me.role === 'agent' 
       ? archivedReqs.filter(r => r.agent_id === me.person_id)
       : archivedReqs;
 
     return `
-      <h2>Archived Data</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Archived Data</h2>
+        <button class="b" onclick="exportArchiveToCSV()">⬇ Export Archive to CSV</button>
+      </div>
       <p class="mu">Historical completed requests removed from the live queue to keep the system lean.</p>
       
       <div class="tw"><table><thead><tr>
