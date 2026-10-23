@@ -74,7 +74,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
   const dtd = s => s ? new Date(s).toLocaleDateString() : '—';
 
-  let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], chime = null, creditTypes = [], drillDown = null;
+  let me = null, tab = null, reqs = [], agentReqs = [], archivedReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
@@ -84,13 +84,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config', qa:'QA Queue', trainer:'Coaching Queue' };
   const TABS = {
-    agent: ['Request','My requests'],
-    tl: ['Board','My team','History'],
-    oam: ['Dashboard', 'Coaching Queue'],
-    om: ['Dashboard'],
-    admin: ['Config','Roster','Hierarchy','Assignments','Reporting','Anomalies','Audit'],
-    qa: ['Dashboard', 'QA Queue'],
-    trainer: ['Dashboard', 'Agent Scorecards', 'Coaching Queue']
+    agent: ['Request','My requests','Archive'],
+    tl: ['Board','My team','History','Archive'],
+    oam: ['Dashboard', 'Coaching Queue', 'Archive'],
+    om: ['Dashboard', 'Archive'],
+    admin: ['Config','Roster','Hierarchy','Assignments','Reporting','Data Management','Anomalies','Audit'],
+    qa: ['Dashboard', 'QA Queue', 'Archive'],
+    trainer: ['Dashboard', 'Agent Scorecards', 'Coaching Queue', 'Archive']
   };
 
   window.signIn = async () => {
@@ -207,12 +207,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       
       const { data: qaData } = await sb.from('qa_reviews').select('*').order('created_at', {ascending: false});
       qaReviews = qaData || [];
+
+      // Fetch Archive
+      const { data: arcData } = await sb.from('archive_requests').select('*').order('created_at', {ascending: false});
+      archivedReqs = arcData || [];
     }
     
     if (me.role === 'agent') {
       const { data } = await sb.from('customer_credit_requests').select('*')
         .eq('agent_id', me.person_id).order('created_at', { ascending:false }).limit(50);
       agentReqs = data || [];
+
+      const { data: arcAgentData } = await sb.from('archive_requests').select('*')
+        .eq('agent_id', me.person_id).order('created_at', {ascending: false});
+      archivedReqs = arcAgentData || [];
     }
     
     render();
@@ -231,12 +239,38 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       'Request': viewAgentRequest, 'My requests': viewAgentHistory,
       'Board': viewTLBoard, 'My team': viewTLTeam, 'History': viewTLHistory,
       'Dashboard': viewDash,
-      'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Assignments': viewAssignments, 'Reporting': viewReporting, 'Anomalies': viewAnoms, 'Audit': viewAudit,
+      'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Assignments': viewAssignments, 'Reporting': viewReporting, 'Data Management': viewDataManagement, 'Anomalies': viewAnoms, 'Audit': viewAudit,
       'QA Queue': viewQAQueue,
       'Coaching Queue': viewCoachingQueue,
-      'Agent Scorecards': viewAgentScorecards
+      'Agent Scorecards': viewAgentScorecards,
+      'Archive': viewArchive
     };
     $('#mn').innerHTML = (V[tab] || (()=>'<p>Nothing here.</p>'))();
+  }
+
+  // ============ ARCHIVE VIEW ============
+  function viewArchive() {
+    const myArchive = me.role === 'agent' 
+      ? archivedReqs.filter(r => r.agent_id === me.person_id)
+      : archivedReqs;
+
+    return `
+      <h2>Archived Data</h2>
+      <p class="mu">Historical completed requests removed from the live queue to keep the system lean.</p>
+      
+      <div class="tw"><table><thead><tr>
+        <th>Request ID</th><th>Agent</th><th>Amount</th><th>Status</th><th>Actioned By</th><th>Date</th>
+      </tr></thead><tbody>
+        ${myArchive.map(r => `<tr>
+          <td>${r.request_id}</td>
+          <td>${esc(r.agent_id)}</td>
+          <td>${r.currency} ${fmt(r.amount)}</td>
+          <td><span class="pill s-${r.status}">${r.status}</span></td>
+          <td>${esc(r.approved_by_tl_id || '—')}</td>
+          <td>${dtd(r.created_at)}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="mu">No archived records found.</td></tr>'}
+      </tbody></table></div>
+    `;
   }
 
   // ============ AGENT & TL VIEWS ============
@@ -409,7 +443,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       let myTls = [];
       
-      // QA and Trainer are restricted by their assignments!
       if (me.role === 'qa' || me.role === 'trainer') {
         const myAssignedTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
         myTls = tls.filter(t => myAssignedTlIds.includes(t.tl_id));
@@ -654,14 +687,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
-      
-      // Filter by QA Assignment
       const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
-      
       const matchesAgent = qaFilterAgent === '' || r.agent_id.toLowerCase().includes(qaFilterAgent.toLowerCase());
       const matchesTl = qaFilterTl === '' || r.approved_by_tl_id === qaFilterTl;
       const matchesReason = qaFilterReason === '' || r.reason_code === qaFilterReason;
-      
       return isPending && isAssignedToMe && matchesAgent && matchesTl && matchesReason;
     });
     
@@ -841,7 +870,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       if (me.role === 'trainer' && q.trainer_status !== 'pending') return false;
       if (me.role === 'oam' && q.oam_status !== 'pending') return false;
       
-      // If Trainer, check if this request belongs to their assigned TL
       if (me.role === 'trainer') {
         const req = reqs.find(r => r.request_id === q.request_id);
         if (req && myTlIds.length > 0 && !myTlIds.includes(req.agent_team_tl_id)) return false;
@@ -1201,9 +1229,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   };
 
   function viewAssignments() {
-    const qaProfiles = []; // We'll use hardcoded test IDs for now, or dynamic if we fetch profiles
-    // To make it easy, let's query the profiles table (assuming we have staff)
-    // Since we don't have a list of QA/Trainer in memory, let's just use placeholders for the test
     const staff = [
       { id: 'QA01', name: 'QA', role: 'qa' },
       { id: 'TR01', name: 'Trainer', role: 'trainer' }
@@ -1261,6 +1286,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       headers = ['Request ID', 'QA Result', 'Coaching Date', 'Coaching Type', 'Trainer Notes'];
       rows = qaReviews.filter(q => q.qa_result === 'fail').map(q => [q.request_id, q.qa_result, q.coaching_date || '', q.coaching_type || '', q.trainer_notes || '']);
       filename = 'coaching_log.csv';
+    } else if (type === 'archived') {
+      headers = ['Request ID', 'Agent ID', 'TL ID', 'Amount', 'Status', 'Date'];
+      rows = archivedReqs.map(r => [r.request_id, r.agent_id, r.agent_team_tl_id, r.amount, r.status, r.created_at]);
+      filename = 'archived_requests.csv';
     }
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -1283,10 +1312,41 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <div class="card">
         <h3>Download Data Exports</h3>
         <div class="row" style="gap:20px;">
-          <button class="b" onclick="downloadReport('all_requests')">⬇ Export All Requests</button>
+          <button class="b" onclick="downloadReport('all_requests')">⬇ Export All Live Requests</button>
           <button class="b" onclick="downloadReport('qa_history')">⬇ Export QA History</button>
           <button class="b" onclick="downloadReport('coaching_log')">⬇ Export Coaching Log</button>
+          <button class="b" onclick="downloadReport('archived')">⬇ Export Archived Data</button>
         </div>
+      </div>
+    `;
+  }
+
+  window.archiveData = async () => {
+    if (!confirm("Are you sure? This will move all completed, rejected, and expired requests to the Archive table and remove them from the live queues. Agents, TLs, OAMs, and QA will still see them in their Archive tab.")) return;
+    
+    $('#archMsg').textContent = 'Archiving…';
+    const { data, error } = await sb.rpc('archive_old_requests');
+    
+    if (error) {
+      $('#archMsg').textContent = 'Error: ' + error.message;
+      $('#archMsg').style.color = 'var(--ac)';
+    } else {
+      $('#archMsg').textContent = `Done! ${data.archived_count} requests moved to archive.`;
+      $('#archMsg').style.color = 'var(--ok)';
+      await refresh();
+    }
+  };
+
+  function viewDataManagement() {
+    return `
+      <h2>Data Management</h2>
+      <p class="mu">Keep the live database lean by moving historical data to the Archive table. Users can still access this data in their respective "Archive" tabs.</p>
+      
+      <div class="card">
+        <h3>Archive & Clear Live Data</h3>
+        <p>This will move all <b>Approved, Rejected, and Expired</b> requests to the archive. Active requests will remain in the queues.</p>
+        <button class="b" onclick="archiveData()">Archive and Clear Live Requests</button>
+        <span id="archMsg" class="mu" style="margin-left:10px;"></span>
       </div>
     `;
   }
