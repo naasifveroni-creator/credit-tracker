@@ -74,7 +74,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
   const dtd = s => s ? new Date(s).toLocaleDateString() : '—';
 
-  let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], qaReviews = [], chime = null, creditTypes = [], drillDown = null;
+  let me = null, tab = null, reqs = [], agentReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
@@ -88,7 +88,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     tl: ['Board','My team','History'],
     oam: ['Dashboard', 'Coaching Queue'],
     om: ['Dashboard'],
-    admin: ['Config','Roster','Hierarchy','Anomalies','Audit'],
+    admin: ['Config','Roster','Hierarchy','Assignments','Reporting','Anomalies','Audit'],
     qa: ['Dashboard', 'QA Queue'],
     trainer: ['Dashboard', 'Agent Scorecards', 'Coaching Queue']
   };
@@ -124,6 +124,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       tls = tlData || [];
       const { data: oamData } = await sb.from('oams').select('*');
       oams = oamData || [];
+    }
+
+    if (['admin', 'qa', 'trainer'].includes(me.role)) {
+      const { data: asgData } = await sb.from('team_assignments').select('*');
+      assignments = asgData || [];
     }
     
     if (me.role === 'admin') {
@@ -226,7 +231,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       'Request': viewAgentRequest, 'My requests': viewAgentHistory,
       'Board': viewTLBoard, 'My team': viewTLTeam, 'History': viewTLHistory,
       'Dashboard': viewDash,
-      'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Anomalies': viewAnoms, 'Audit': viewAudit,
+      'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Assignments': viewAssignments, 'Reporting': viewReporting, 'Anomalies': viewAnoms, 'Audit': viewAudit,
       'QA Queue': viewQAQueue,
       'Coaching Queue': viewCoachingQueue,
       'Agent Scorecards': viewAgentScorecards
@@ -401,14 +406,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
-    // --- SHARED DASHBOARD FOR OAM, QA, TRAINER ---
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
       let myTls = [];
       
-      if (me.role === 'oam') {
-        myTls = tls.filter(t => t.oam_id === me.oam_id);
+      // QA and Trainer are restricted by their assignments!
+      if (me.role === 'qa' || me.role === 'trainer') {
+        const myAssignedTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
+        myTls = tls.filter(t => myAssignedTlIds.includes(t.tl_id));
       } else {
-        myTls = tls; 
+        myTls = tls.filter(t => t.oam_id === me.oam_id);
       }
       
       const tlIds = myTls.map(t => t.tl_id);
@@ -644,12 +650,19 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewQAQueue() {
+    const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
+    
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
+      
+      // Filter by QA Assignment
+      const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
+      
       const matchesAgent = qaFilterAgent === '' || r.agent_id.toLowerCase().includes(qaFilterAgent.toLowerCase());
       const matchesTl = qaFilterTl === '' || r.approved_by_tl_id === qaFilterTl;
       const matchesReason = qaFilterReason === '' || r.reason_code === qaFilterReason;
-      return isPending && matchesAgent && matchesTl && matchesReason;
+      
+      return isPending && isAssignedToMe && matchesAgent && matchesTl && matchesReason;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${qaFilterTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
@@ -684,7 +697,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <td>${esc(r.reason_code)}</td>
           <td><span class="pill s-${r.status}">${r.status}</span></td>
           <td><button class="b" onclick="openQAReview('${r.request_id}')">Review</button></td>
-        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found with these filters.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found for your assigned teams.</td></tr>'}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
@@ -820,10 +833,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewCoachingQueue() {
-    // UPDATED: Now shows BOTH Passes and Fails that are pending action for the specific role
+    const myTlIds = me.role === 'trainer' 
+      ? assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id) 
+      : null;
+      
     const pendingActions = qaReviews.filter(q => {
-      if (me.role === 'trainer') return q.trainer_status === 'pending';
-      if (me.role === 'oam') return q.oam_status === 'pending';
+      if (me.role === 'trainer' && q.trainer_status !== 'pending') return false;
+      if (me.role === 'oam' && q.oam_status !== 'pending') return false;
+      
+      // If Trainer, check if this request belongs to their assigned TL
+      if (me.role === 'trainer') {
+        const req = reqs.find(r => r.request_id === q.request_id);
+        if (req && myTlIds.length > 0 && !myTlIds.includes(req.agent_team_tl_id)) return false;
+      }
+      
       return true;
     });
     
@@ -1162,6 +1185,110 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
 
     return html;
+  }
+
+  // ============ ADMIN ASSIGNMENTS & REPORTING ============
+  
+  window.assignTeam = async (staffId, tlId) => {
+    const { error } = await sb.from('team_assignments').insert({ staff_id: staffId, staff_role: staffId.startsWith('QA') ? 'qa' : 'trainer', tl_id: tlId });
+    if (error) alert(error.message); else { alert('Team assigned!'); const { data } = await sb.from('team_assignments').select('*'); assignments = data || []; render(); }
+  };
+
+  window.removeAssignment = async (assignId) => {
+    await sb.from('team_assignments').delete().eq('assignment_id', assignId);
+    alert('Assignment removed!');
+    const { data } = await sb.from('team_assignments').select('*'); assignments = data || []; render();
+  };
+
+  function viewAssignments() {
+    const qaProfiles = []; // We'll use hardcoded test IDs for now, or dynamic if we fetch profiles
+    // To make it easy, let's query the profiles table (assuming we have staff)
+    // Since we don't have a list of QA/Trainer in memory, let's just use placeholders for the test
+    const staff = [
+      { id: 'QA01', name: 'QA', role: 'qa' },
+      { id: 'TR01', name: 'Trainer', role: 'trainer' }
+    ];
+
+    const allAssignments = staff.map(s => {
+      const myAsg = assignments.filter(a => a.staff_id === s.id);
+      const rows = myAsg.map(a => {
+        const tl = tls.find(t => t.tl_id === a.tl_id);
+        return `<tr>
+          <td>${tl ? esc(tl.name) : a.tl_id} (${a.tl_id})</td>
+          <td><button class="s r" onclick="removeAssignment('${a.assignment_id}')">Remove</button></td>
+        </tr>`;
+      }).join('');
+
+      const availableTls = tls.filter(t => !myAsg.find(a => a.tl_id === t.tl_id));
+      const tlOpts = availableTls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
+
+      return `
+        <div class="card">
+          <h3>${s.name} (${s.role.toUpperCase()})</h3>
+          <div class="row" style="margin-bottom:10px;">
+            <label>Assign a TL<select id="asg_${s.id}">
+              <option value="">-- Select TL --</option>
+              ${tlOpts}
+            </select></label>
+            <button class="b" onclick="assignTeam('${s.id}', $('#asg_${s.id}').value)">Assign Team</button>
+          </div>
+          <div class="tw"><table><thead><tr>
+            <th>Assigned Team Leader</th><th>Action</th>
+          </tr></thead><tbody>
+            ${rows || '<tr><td colspan="2" class="mu">No teams assigned.</td></tr>'}
+          </tbody></table></div>
+        </div>
+      `;
+    }).join('');
+
+    return `<h2>Manage Assignments</h2><p class="mu">Assign specific TLs to QA and Trainers to restrict their visibility.</p>${allAssignments}`;
+  }
+
+  window.downloadReport = (type) => {
+    let headers = [];
+    let rows = [];
+    let filename = '';
+
+    if (type === 'all_requests') {
+      headers = ['Request ID', 'Agent ID', 'TL ID', 'OAM ID', 'Amount', 'Currency', 'Reason', 'Status', 'Actioned By', 'Date'];
+      rows = reqs.map(r => [r.request_id, r.agent_id, r.agent_team_tl_id, r.oam_id, r.amount, r.currency, r.reason_code, r.status, r.approved_by_tl_id || '', r.created_at]);
+      filename = 'all_requests.csv';
+    } else if (type === 'qa_history') {
+      headers = ['Request ID', 'QA Result', 'Severity', 'QA Insight', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes', 'Date'];
+      rows = qaReviews.map(q => [q.request_id, q.qa_result, q.severity, q.qa_insights, q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || '', q.created_at]);
+      filename = 'qa_history.csv';
+    } else if (type === 'coaching_log') {
+      headers = ['Request ID', 'QA Result', 'Coaching Date', 'Coaching Type', 'Trainer Notes'];
+      rows = qaReviews.filter(q => q.qa_result === 'fail').map(q => [q.request_id, q.qa_result, q.coaching_date || '', q.coaching_type || '', q.trainer_notes || '']);
+      filename = 'coaching_log.csv';
+    }
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers, ...rows].map(e => e.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  function viewReporting() {
+    return `
+      <h2>Administrative Reporting</h2>
+      <p class="mu">Extract full data dumps for external analysis or compliance audits.</p>
+      
+      <div class="card">
+        <h3>Download Data Exports</h3>
+        <div class="row" style="gap:20px;">
+          <button class="b" onclick="downloadReport('all_requests')">⬇ Export All Requests</button>
+          <button class="b" onclick="downloadReport('qa_history')">⬇ Export QA History</button>
+          <button class="b" onclick="downloadReport('coaching_log')">⬇ Export Coaching Log</button>
+        </div>
+      </div>
+    `;
   }
 
   function viewAnoms() {
