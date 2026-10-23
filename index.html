@@ -74,7 +74,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   const dt  = s => s ? new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
   const dtd = s => s ? new Date(s).toLocaleDateString() : '—';
 
-  let me = null, tab = null, reqs = [], agentReqs = [], archivedReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], chime = null, creditTypes = [], drillDown = null;
+  let me = null, tab = null, reqs = [], agentReqs = [], archivedReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], allAgents = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
@@ -130,8 +130,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       const { data: asgData } = await sb.from('team_assignments').select('*');
       assignments = asgData || [];
     }
-    
+
     if (me.role === 'admin') {
+      const { data: agData } = await sb.from('agents').select('*');
+      allAgents = agData || [];
       await loadAdminData();
     }
     
@@ -1314,6 +1316,22 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       headers = ['Request ID', 'Agent ID', 'TL ID', 'Amount', 'Status', 'Date'];
       rows = archivedReqs.map(r => [r.request_id, r.agent_id, r.agent_team_tl_id, r.amount, r.status, r.created_at]);
       filename = 'archived_requests.csv';
+    } else if (type === 'all_agents') {
+      headers = ['Agent ID', 'Name', 'Email', 'PPR', 'Wave', 'TL ID', 'OAM ID', 'OM ID', 'Status'];
+      rows = allAgents.map(a => [a.agent_id, a.name, a.email || '', a.ppr || '', a.wave || '', a.tl_id || '', a.oam_id || '', a.om_id || '', a.status]);
+      filename = 'all_agents.csv';
+    } else if (type === 'all_tls') {
+      headers = ['TL ID', 'Name', 'Email', 'OAM ID', 'OM ID', 'Status'];
+      rows = tls.map(t => [t.tl_id, t.name, t.email || '', t.oam_id || '', t.om_id || '', t.status]);
+      filename = 'all_tls.csv';
+    } else if (type === 'all_oams') {
+      headers = ['OAM ID', 'Name', 'Email', 'OM ID', 'Status'];
+      rows = oams.map(o => [o.oam_id, o.name, o.email || '', o.om_id || '', o.status]);
+      filename = 'all_oams.csv';
+    } else if (type === 'all_assignments') {
+      headers = ['Staff ID', 'Staff Role', 'Assigned TL ID'];
+      rows = assignments.map(a => [a.staff_id, a.staff_role, a.tl_id]);
+      filename = 'all_assignments.csv';
     }
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -1334,12 +1352,22 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <p class="mu">Extract full data dumps for external analysis or compliance audits.</p>
       
       <div class="card">
-        <h3>Download Data Exports</h3>
-        <div class="row" style="gap:20px;">
+        <h3>Operational Data Exports</h3>
+        <div class="row" style="gap:20px; margin-bottom:15px;">
           <button class="b" onclick="downloadReport('all_requests')">⬇ Export All Live Requests</button>
           <button class="b" onclick="downloadReport('qa_history')">⬇ Export QA History</button>
           <button class="b" onclick="downloadReport('coaching_log')">⬇ Export Coaching Log</button>
           <button class="b" onclick="downloadReport('archived')">⬇ Export Archived Data</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Roster & Hierarchy Exports</h3>
+        <div class="row" style="gap:20px;">
+          <button class="b" onclick="downloadReport('all_agents')">⬇ Export All Agents</button>
+          <button class="b" onclick="downloadReport('all_tls')">⬇ Export All TLs</button>
+          <button class="b" onclick="downloadReport('all_oams')">⬇ Export All OAMs</button>
+          <button class="b" onclick="downloadReport('all_assignments')">⬇ Export All QA/Trainer Assignments</button>
         </div>
       </div>
     `;
