@@ -147,16 +147,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     buildNav();
     await refresh();
     subscribe();
-    
-    setInterval(() => {
-      // THE GLOBAL FIX: Do not refresh if a user is currently typing or focused on any input/select
-      const activeEl = document.activeElement;
-      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
-      
-      if (!document.getElementById('fref') && !document.getElementById('qaInsights') && !document.getElementById('coachNotes') && !isTyping) {
-        refresh();
-      }
-    }, 10000);
   }
 
   async function loadAdminData() {
@@ -681,7 +671,25 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     window.memQaAgent = qaFilterAgent;
     window.memQaTl = qaFilterTl;
     window.memQaReason = qaFilterReason;
-    render();
+    filterQaTable();
+  };
+
+  window.filterQaTable = () => {
+    const curAgent = (window.memQaAgent || '').toLowerCase();
+    const curTl = window.memQaTl || '';
+    const curReason = window.memQaReason || '';
+
+    document.querySelectorAll('.qa-queue-row').forEach(row => {
+      const agent = (row.getAttribute('data-agent') || '').toLowerCase();
+      const tl = row.getAttribute('data-tl') || '';
+      const reason = row.getAttribute('data-reason') || '';
+
+      const matchesAgent = curAgent === '' || agent.includes(curAgent);
+      const matchesTl = curTl === '' || tl === curTl;
+      const matchesReason = curReason === '' || reason === curReason;
+
+      row.style.display = (matchesAgent && matchesTl && matchesReason) ? '' : 'none';
+    });
   };
 
   window.exportHistoryToCSV = () => {
@@ -764,44 +772,44 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
     
     // USE GLOBAL MEMORY FOR FILTERS
-    const curAgent = window.memQaAgent || qaFilterAgent;
-    const curTl = window.memQaTl || qaFilterTl;
-    const curReason = window.memQaReason || qaFilterReason;
+    const curAgent = window.memQaAgent || '';
+    const curTl = window.memQaTl || '';
+    const curReason = window.memQaReason || '';
 
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
       const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
-      const matchesAgent = curAgent === '' || r.agent_id.toLowerCase().includes(curAgent.toLowerCase());
-      const matchesTl = curTl === '' || r.approved_by_tl_id === curTl;
-      const matchesReason = curReason === '' || r.reason_code === curReason;
-      return isPending && isAssignedToMe && matchesAgent && matchesTl && matchesReason;
+      return isPending && isAssignedToMe;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+
+    // Schedule a one-time filter application after render (no timer)
+    setTimeout(() => { if (typeof window.filterQaTable === 'function') window.filterQaTable(); }, 0);
 
     return `
       <h2>QA Review Queue</h2>
       
       <div class="card row" style="margin-bottom:12px; align-items:center;">
-        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(curAgent)}" oninput="applyQaFilter()" placeholder="Search Agent..."></label>
-        <label>Filter by TL<select id="qaFilterTl" onchange="applyQaFilter()">
+        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(curAgent)}" oninput="window.memQaAgent=this.value; filterQaTable();" placeholder="Search Agent..."></label>
+        <label>Filter by TL<select id="qaFilterTl" onchange="window.memQaTl=this.value; filterQaTable();">
           <option value="">-- All TLs --</option>
           ${tlOpts}
         </select></label>
-        <label>Filter by Reason<select id="qaFilterReason" onchange="applyQaFilter()">
+        <label>Filter by Reason<select id="qaFilterReason" onchange="window.memQaReason=this.value; filterQaTable();">
           <option value="">-- All Reasons --</option>
           <option ${curReason === 'Waiver' ? 'selected' : ''}>Waiver</option>
           <option ${curReason === 'Goodwill' ? 'selected' : ''}>Goodwill</option>
           <option ${curReason === 'ServiceFailure' ? 'selected' : ''}>ServiceFailure</option>
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
-        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; qaFilterReason=''; window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
+        <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
       </div>
 
       <div class="tw"><table><thead><tr>
         <th>Request</th><th>Agent</th><th>Actioned By</th><th>Amount</th><th>Reason</th><th>Status</th><th>Action</th>
       </tr></thead><tbody>
-        ${pendingQA.map(r => `<tr>
+        ${pendingQA.map(r => `<tr class="qa-queue-row" data-agent="${esc(r.agent_id)}" data-tl="${esc(r.approved_by_tl_id || '')}" data-reason="${esc(r.reason_code)}">
           <td>${r.request_id}</td>
           <td>${esc(r.agent_id)}</td>
           <td>${esc(r.approved_by_tl_id || '—')}</td>
