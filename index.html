@@ -209,6 +209,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           const reqTlObj = tls.find(t => t.tl_id === reqTl);
           const owningOam = reqTlObj ? reqTlObj.oam_id : null;
           const assignedTrainers = assignments.filter(a => a.staff_role === 'trainer' && a.tl_id === reqTl).map(a => a.staff_id);
+          const assignedQas = assignments.filter(a => a.staff_role === 'qa' && a.tl_id === reqTl).map(a => a.staff_id);
 
           const isActor = qa.updated_by && qa.updated_by === me.person_id;
 
@@ -232,8 +233,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
             if (trainerChanged) {
               const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isQaForMe = me.role === 'qa' && assignedQas.includes(me.person_id);
               const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
-              if (isQaSubmitter || isOwningOam) {
+              if (isQaSubmitter || isQaForMe || isOwningOam) {
                 playChime();
                 alert(`NOTIFICATION: Trainer updated review for ${qa.request_id}.\nTrainer status: ${(qa.trainer_status||'').toUpperCase()}`);
               }
@@ -1648,16 +1650,48 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
   };
 
+  window.archiveQAReviews = async () => {
+    const daysInput = $('#archQaDays');
+    const days = daysInput ? +daysInput.value : 90;
+    if (!days || days < 1) return alert('Please enter a valid number of days (≥ 1).');
+
+    if (!confirm(`Archive QA reviews that are FULLY CLOSED (Trainer AND OAM both marked actioned/coached) and older than ${days} days?\n\nPending reviews will stay in the queues.`)) return;
+
+    $('#archQaMsg').textContent = 'Archiving…';
+    $('#archQaMsg').style.color = 'var(--mu)';
+
+    const { data, error } = await sb.rpc('archive_old_qa_reviews', { p_days: days });
+
+    if (error) {
+      $('#archQaMsg').textContent = 'Error: ' + error.message;
+      $('#archQaMsg').style.color = 'var(--ac)';
+    } else {
+      $('#archQaMsg').textContent = `Done! ${data.archived_count} QA reviews moved to archive.`;
+      $('#archQaMsg').style.color = 'var(--ok)';
+      await refresh();
+    }
+  };
+
   function viewDataManagement() {
     return `
       <h2>Data Management</h2>
-      <p class="mu">Keep the live database lean by moving historical data to the Archive table. Users can still access this data in their respective "Archive" tabs.</p>
+      <p class="mu">Keep the live database lean by moving historical data to the Archive tables. Users can still access this data in their respective "Archive" tabs.</p>
       
       <div class="card">
-        <h3>Archive & Clear Live Data</h3>
+        <h3>Archive & Clear Live Requests</h3>
         <p>This will move all <b>Approved, Rejected, and Expired</b> requests to the archive. Active requests will remain in the queues.</p>
         <button class="b" onclick="archiveData()">Archive and Clear Live Requests</button>
         <span id="archMsg" class="mu" style="margin-left:10px;"></span>
+      </div>
+
+      <div class="card">
+        <h3>Archive & Clear QA Reviews</h3>
+        <p>This will move <b>only fully closed</b> QA reviews (Trainer AND OAM both marked <code>actioned</code> or <code>coached</code>) to the archive. Pending reviews stay in the queues.</p>
+        <div class="row" style="align-items:end;">
+          <label>Older than (days)<input id="archQaDays" type="number" min="1" value="90" style="width:100px;"></label>
+          <button class="b" onclick="archiveQAReviews()">Archive Closed QA Reviews</button>
+          <span id="archQaMsg" class="mu" style="margin-left:10px;"></span>
+        </div>
       </div>
     `;
   }
