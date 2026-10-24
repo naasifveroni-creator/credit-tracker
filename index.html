@@ -675,36 +675,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   // ============ QA & TRAINER VIEWS ============
   
   window.applyQaFilter = () => {
-    // Save the filters to memory
-    window.memQaAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
-    window.memQaTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
-    window.memQaReason = $('#qaFilterReason') ? $('#qaFilterReason').value : '';
-    
-    // Filter the table instantly without rebuilding the page
-    filterQaTable();
-  };
-
-  window.filterQaTable = () => {
-    const curAgent = window.memQaAgent || '';
-    const curTl = window.memQaTl || '';
-    const curReason = window.memQaReason || '';
-
-    const rows = document.querySelectorAll('.qa-queue-row');
-    rows.forEach(row => {
-      const agentId = row.getAttribute('data-agent');
-      const tlId = row.getAttribute('data-tl');
-      const reason = row.getAttribute('data-reason');
-
-      const matchesAgent = curAgent === '' || agentId.includes(curAgent.toLowerCase());
-      const matchesTl = curTl === '' || tlId === curTl;
-      const matchesReason = curReason === '' || reason === curReason;
-
-      if (matchesAgent && matchesTl && matchesReason) {
-        row.style.display = '';
-      } else {
-        row.style.display = 'none';
-      }
-    });
+    qaFilterAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
+    qaFilterTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
+    qaFilterReason = $('#qaFilterReason') ? $('#qaFilterReason').value : '';
+    window.memQaAgent = qaFilterAgent;
+    window.memQaTl = qaFilterTl;
+    window.memQaReason = qaFilterReason;
+    render();
   };
 
   window.exportHistoryToCSV = () => {
@@ -787,14 +764,17 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
     
     // USE GLOBAL MEMORY FOR FILTERS
-    const curAgent = window.memQaAgent || '';
-    const curTl = window.memQaTl || '';
-    const curReason = window.memQaReason || '';
+    const curAgent = window.memQaAgent || qaFilterAgent;
+    const curTl = window.memQaTl || qaFilterTl;
+    const curReason = window.memQaReason || qaFilterReason;
 
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
       const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
-      return isPending && isAssignedToMe;
+      const matchesAgent = curAgent === '' || r.agent_id.toLowerCase().includes(curAgent.toLowerCase());
+      const matchesTl = curTl === '' || r.approved_by_tl_id === curTl;
+      const matchesReason = curReason === '' || r.reason_code === curReason;
+      return isPending && isAssignedToMe && matchesAgent && matchesTl && matchesReason;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
@@ -803,7 +783,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <h2>QA Review Queue</h2>
       
       <div class="card row" style="margin-bottom:12px; align-items:center;">
-        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(curAgent)}" oninput="window.memQaAgent=this.value; applyQaFilter();" placeholder="Search Agent..."></label>
+        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(curAgent)}" oninput="applyQaFilter()" placeholder="Search Agent..."></label>
         <label>Filter by TL<select id="qaFilterTl" onchange="applyQaFilter()">
           <option value="">-- All TLs --</option>
           ${tlOpts}
@@ -815,13 +795,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option ${curReason === 'ServiceFailure' ? 'selected' : ''}>ServiceFailure</option>
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
-        <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render();">Clear</button>
+        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; qaFilterReason=''; window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
       </div>
 
       <div class="tw"><table><thead><tr>
         <th>Request</th><th>Agent</th><th>Actioned By</th><th>Amount</th><th>Reason</th><th>Status</th><th>Action</th>
       </tr></thead><tbody>
-        ${pendingQA.map(r => `<tr class="qa-queue-row" data-agent="${esc(r.agent_id.toLowerCase())}" data-tl="${esc(r.approved_by_tl_id)}" data-reason="${esc(r.reason_code)}">
+        ${pendingQA.map(r => `<tr>
           <td>${r.request_id}</td>
           <td>${esc(r.agent_id)}</td>
           <td>${esc(r.approved_by_tl_id || '—')}</td>
@@ -835,11 +815,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <div id="qaReviewForm"></div>
       
       ${renderReviewHistory()}
-      
-      <script>
-        // Apply the filter immediately when the page loads
-        setTimeout(filterQaTable, 50);
-      </script>
     `;
   }
 
@@ -1209,7 +1184,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
         <!-- NEW SEARCH/FILTER BAR FOR AGENTS -->
         <div class="row" style="margin-top: 15px; padding: 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--bd);">
-          <label>Search Agent (Name or ID)<input type="text" id="adminAgSearch" oninput="window.adminAgentSearchText=this.value; filterAdminAgents();" placeholder="Type to search..." value="${window.adminAgentSearchText || ''}"></label>
+          <label>Search Agent (Name or ID)<input type="text" id="adminAgSearch" oninput="filterAdminAgents()" placeholder="Type to search..." value="${window.adminAgentSearchText || ''}"></label>
           <label>Filter by TL<select id="adminAgFilterTl" onchange="filterAdminAgents()">
             <option value="">-- All TLs --</option>
             ${tlOpts}
@@ -1238,7 +1213,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const tlFilter = $('#adminAgFilterTl').value;
     
     // Save to memory
-    window.adminAgentSearchText = $('#adminAgSearch').value;
+    window.adminAgentSearchText = search;
     window.adminAgentFilterTl = tlFilter;
 
     const rows = document.querySelectorAll('.admin-agent-row');
