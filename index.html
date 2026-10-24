@@ -184,26 +184,71 @@ textarea{width:100%;min-height:80px;font-family:inherit}
               alert("NOTIFICATION: Your request was REJECTED.\nReason: " + (payload.new.rejection_reason || 'None provided'));
             }
           }
+
+          if (payload.eventType === 'UPDATE' && me.role === 'qa' && ['approved','rejected'].includes(payload.new.status) && !['approved','rejected'].includes(payload.old.status)) {
+            const reqTl = payload.new.agent_team_tl_id;
+            const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
+            const isForMe = myTlIds.length === 0 || myTlIds.includes(reqTl);
+            if (isForMe) {
+              playChime();
+              alert(`NOTIFICATION: Request ${payload.new.request_id} is ready for QA review.`);
+            }
+          }
         })
-      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'qa_reviews' },
+      .on('postgres_changes', { event:'*', schema:'public', table:'qa_reviews' },
         async payload => {
           if (!document.getElementById('fref') && !document.getElementById('qaInsights') && !document.getElementById('coachNotes')) { 
             await refresh(); 
           }
-          
-          if (['qa', 'trainer', 'oam', 'om'].includes(me.role)) {
-            playChime();
-            
-            let msg = `NOTIFICATION: A QA Review has been updated for Request ${payload.new.request_id}.`;
-            
-            if (payload.new.trainer_status !== payload.old.trainer_status) {
-                msg += `\n\nTrainer marked it as: ${payload.new.trainer_status.toUpperCase()}`;
+
+          const qa = payload.new;
+          const req = reqs.find(r => r.request_id === qa.request_id);
+          if (!req) return;
+
+          const reqTl = req.agent_team_tl_id;
+          const reqTlObj = tls.find(t => t.tl_id === reqTl);
+          const owningOam = reqTlObj ? reqTlObj.oam_id : null;
+          const assignedTrainers = assignments.filter(a => a.staff_role === 'trainer' && a.tl_id === reqTl).map(a => a.staff_id);
+
+          const isActor = qa.updated_by && qa.updated_by === me.person_id;
+
+          // === QA REVIEW INSERTED (QA just submitted) ===
+          if (payload.eventType === 'INSERT') {
+            if (isActor) return; // suppress submitter
+            const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
+            const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
+            if (isTrainerForMe || isOwningOam) {
+              playChime();
+              alert(`NOTIFICATION: New QA review submitted for ${qa.request_id}.\nResult: ${(qa.qa_result||'').toUpperCase()}`);
             }
-            if (payload.new.oam_status !== payload.old.oam_status) {
-                msg += `\n\nOAM marked it as: ${payload.new.oam_status.toUpperCase()}`;
+            return;
+          }
+
+          // === QA REVIEW UPDATED ===
+          if (payload.eventType === 'UPDATE') {
+            if (isActor) return; // suppress actor
+            const trainerChanged = qa.trainer_status !== payload.old.trainer_status;
+            const oamChanged = qa.oam_status !== payload.old.oam_status;
+
+            if (trainerChanged) {
+              const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
+              if (isQaSubmitter || isOwningOam) {
+                playChime();
+                alert(`NOTIFICATION: Trainer updated review for ${qa.request_id}.\nTrainer status: ${(qa.trainer_status||'').toUpperCase()}`);
+              }
             }
 
-            alert(msg);
+            if (oamChanged) {
+              const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
+              const isAgentTl = me.role === 'tl' && me.person_id === reqTl;
+              const isApprovingTl = me.role === 'tl' && me.person_id === req.approved_by_tl_id;
+              if (isQaSubmitter || isTrainerForMe || isAgentTl || isApprovingTl) {
+                playChime();
+                alert(`NOTIFICATION: OAM updated review for ${qa.request_id}.\nOAM status: ${(qa.oam_status||'').toUpperCase()}`);
+              }
+            }
           }
         })
       .subscribe();
@@ -906,7 +951,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       severity: sev,
       checked_justification: chkJust,
       checked_policy: chkPol,
-      checked_pnr: chkPnr
+      checked_pnr: chkPnr,
+      updated_by: me.person_id
     });
     
     if (error) return alert(error.message);
@@ -1047,8 +1093,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const cType = $('#coachType') ? $('#coachType').value : null;
     
     const updateData = me.role === 'trainer' 
-      ? { trainer_status: stat, trainer_notes: notes, coaching_date: cDate || null, coaching_type: cType || null }
-      : { oam_status: stat, oam_notes: notes };
+      ? { trainer_status: stat, trainer_notes: notes, coaching_date: cDate || null, coaching_type: cType || null, updated_by: me.person_id }
+      : { oam_status: stat, oam_notes: notes, updated_by: me.person_id };
       
     const { error } = await sb.from('qa_reviews').update(updateData).eq('review_id', reviewId);
     
