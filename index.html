@@ -78,9 +78,12 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
+  // GLOBAL SEARCH MEMORY
   let qaFilterAgent = '';
   let qaFilterTl = '';
   let qaFilterReason = '';
+  window.adminAgentSearchText = '';
+  window.adminAgentFilterTl = '';
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config', qa:'QA Queue', trainer:'Coaching Queue' };
   const TABS = {
@@ -146,7 +149,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     subscribe();
     
     setInterval(() => {
-      // Do not refresh if a user is currently typing in any input field
+      // THE GLOBAL FIX: Do not refresh if a user is currently typing or focused on any input/select
       const activeEl = document.activeElement;
       const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
       
@@ -675,6 +678,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     qaFilterAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
     qaFilterTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
     qaFilterReason = $('#qaFilterReason') ? $('#qaFilterReason').value : '';
+    window.memQaAgent = qaFilterAgent;
+    window.memQaTl = qaFilterTl;
+    window.memQaReason = qaFilterReason;
     render();
   };
 
@@ -757,34 +763,39 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   function viewQAQueue() {
     const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
     
+    // USE GLOBAL MEMORY FOR FILTERS
+    const curAgent = window.memQaAgent || qaFilterAgent;
+    const curTl = window.memQaTl || qaFilterTl;
+    const curReason = window.memQaReason || qaFilterReason;
+
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
       const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
-      const matchesAgent = qaFilterAgent === '' || r.agent_id.toLowerCase().includes(qaFilterAgent.toLowerCase());
-      const matchesTl = qaFilterTl === '' || r.approved_by_tl_id === qaFilterTl;
-      const matchesReason = qaFilterReason === '' || r.reason_code === qaFilterReason;
+      const matchesAgent = curAgent === '' || r.agent_id.toLowerCase().includes(curAgent.toLowerCase());
+      const matchesTl = curTl === '' || r.approved_by_tl_id === curTl;
+      const matchesReason = curReason === '' || r.reason_code === curReason;
       return isPending && isAssignedToMe && matchesAgent && matchesTl && matchesReason;
     });
     
-    const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${qaFilterTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+    const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
 
     return `
       <h2>QA Review Queue</h2>
       
       <div class="card row" style="margin-bottom:12px; align-items:center;">
-        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(qaFilterAgent)}" oninput="applyQaFilter()" placeholder="Search Agent..."></label>
+        <label>Filter by Agent ID<input id="qaFilterAgent" value="${esc(curAgent)}" oninput="applyQaFilter()" placeholder="Search Agent..."></label>
         <label>Filter by TL<select id="qaFilterTl" onchange="applyQaFilter()">
           <option value="">-- All TLs --</option>
           ${tlOpts}
         </select></label>
         <label>Filter by Reason<select id="qaFilterReason" onchange="applyQaFilter()">
           <option value="">-- All Reasons --</option>
-          <option ${qaFilterReason === 'Waiver' ? 'selected' : ''}>Waiver</option>
-          <option ${qaFilterReason === 'Goodwill' ? 'selected' : ''}>Goodwill</option>
-          <option ${qaFilterReason === 'ServiceFailure' ? 'selected' : ''}>ServiceFailure</option>
-          <option ${qaFilterReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
+          <option ${curReason === 'Waiver' ? 'selected' : ''}>Waiver</option>
+          <option ${curReason === 'Goodwill' ? 'selected' : ''}>Goodwill</option>
+          <option ${curReason === 'ServiceFailure' ? 'selected' : ''}>ServiceFailure</option>
+          <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
-        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; qaFilterReason=''; render()">Clear</button>
+        <button class="s" onclick="qaFilterAgent=''; qaFilterTl=''; qaFilterReason=''; window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
       </div>
 
       <div class="tw"><table><thead><tr>
@@ -1201,7 +1212,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const search = $('#adminAgSearch').value.toLowerCase();
     const tlFilter = $('#adminAgFilterTl').value;
     
-    // Save the search text in memory so it survives a page refresh
+    // Save to memory
     window.adminAgentSearchText = search;
     window.adminAgentFilterTl = tlFilter;
 
