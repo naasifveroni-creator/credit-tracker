@@ -1070,6 +1070,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       alert('Staff added!');
       const { data: tlData } = await sb.from('tls').select('*'); tls = tlData || [];
       const { data: oamData } = await sb.from('oams').select('*'); oams = oamData || [];
+      const { data: agData } = await sb.from('agents').select('*'); allAgents = agData || [];
       render();
     };
 
@@ -1165,10 +1166,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <label>Reports to TL<select id="newAgTl">${tlOpts}</select></label>
           <button class="b" onclick="addStaff('agent')">Add Agent</button>
         </div>
+
+        <!-- NEW SEARCH/FILTER BAR FOR AGENTS -->
+        <div class="row" style="margin-top: 15px; padding: 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--bd);">
+          <label>Search Agent (Name or ID)<input type="text" id="adminAgSearch" oninput="filterAdminAgents()" placeholder="Type to search..."></label>
+          <label>Filter by TL<select id="adminAgFilterTl" onchange="filterAdminAgents()">
+            <option value="">-- All TLs --</option>
+            ${tlOpts}
+          </select></label>
+        </div>
+
         <div class="tw" style="margin-top:10px"><table><thead><tr>
           <th>Agent Name</th><th>Move to TL</th><th>Action</th>
-        </tr></thead><tbody>
-          ${allAgents.map(a => `<tr>
+        </tr></thead><tbody id="adminAgentTableBody">
+          ${allAgents.map(a => `<tr class="admin-agent-row" data-name="${esc(a.name.toLowerCase())}" data-id="${esc(a.agent_id.toLowerCase())}" data-tl="${esc(a.tl_id)}">
             <td>${esc(a.name)} (${esc(a.agent_id)})</td>
             <td>
               <select onchange="moveAgent('${esc(a.agent_id)}', this.value)">
@@ -1181,6 +1192,28 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       </div>
     `;
   }
+
+  // Add this helper function right below viewConfig to make the search/filter instant
+  window.filterAdminAgents = () => {
+    const search = $('#adminAgSearch').value.toLowerCase();
+    const tlFilter = $('#adminAgFilterTl').value;
+    const rows = document.querySelectorAll('.admin-agent-row');
+    
+    rows.forEach(row => {
+      const name = row.getAttribute('data-name');
+      const id = row.getAttribute('data-id');
+      const tl = row.getAttribute('data-tl');
+      
+      const matchesSearch = name.includes(search) || id.includes(search);
+      const matchesTl = tlFilter === '' || tl === tlFilter;
+      
+      if (matchesSearch && matchesTl) {
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+      }
+    });
+  };
 
   function viewRoster() {
     return `
