@@ -87,8 +87,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   
   const DEFAULT_TAB = { agent:'Request', tl:'Board', oam:'Dashboard', om:'Dashboard', admin:'Config', qa:'QA Queue', trainer:'Coaching Queue' };
   const TABS = {
-    agent: ['Request','My requests','Archive'],
-    tl: ['Board','My team','History','Archive'],
+    agent: ['Request','My requests','My Coaching','Archive'],
+    tl: ['Board','TL Acknowledgements','My team','History','Archive'],
     oam: ['Dashboard', 'Coaching Queue', 'Archive'],
     om: ['Dashboard', 'Archive'],
     admin: ['Config','Roster','Hierarchy','Assignments','Reporting','Data Management','Anomalies','Audit'],
@@ -122,7 +122,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const { data: types } = await sb.from('credit_types').select('*').eq('active', true);
     creditTypes = types || [];
 
-    if (['oam', 'om', 'admin', 'qa', 'trainer'].includes(me.role)) {
+    if (['oam', 'om', 'admin', 'qa', 'trainer', 'tl'].includes(me.role)) {
       const { data: tlData } = await sb.from('tls').select('*');
       tls = tlData || [];
       const { data: oamData } = await sb.from('oams').select('*');
@@ -230,6 +230,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             if (isActor) return; // suppress actor
             const trainerChanged = qa.trainer_status !== payload.old.trainer_status;
             const oamChanged = qa.oam_status !== payload.old.oam_status;
+            const tlAckChanged = qa.tl_ack_status !== payload.old.tl_ack_status;
+            const agentAckChanged = qa.agent_ack_status !== payload.old.agent_ack_status;
 
             if (trainerChanged) {
               const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
@@ -249,6 +251,38 @@ textarea{width:100%;min-height:80px;font-family:inherit}
               if (isQaSubmitter || isTrainerForMe || isAgentTl || isApprovingTl) {
                 playChime();
                 alert(`NOTIFICATION: OAM updated review for ${qa.request_id}.\nOAM status: ${(qa.oam_status||'').toUpperCase()}`);
+              }
+              // NEW: Notify TL that OAM has actioned it and they need to review/acknowledge
+              if (qa.qa_result === 'fail' && ['reviewed', 'actioned'].includes(qa.oam_status) && qa.tl_ack_status === 'pending' && me.role === 'tl' && me.person_id === reqTl) {
+                alert(`NOTIFICATION: OAM has provided next steps for Request ${qa.request_id}. Please review and acknowledge in your TL Acknowledgements tab.`);
+              }
+            }
+
+            if (tlAckChanged && qa.tl_ack_status === 'acknowledged') {
+              const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
+              const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
+              if (isQaSubmitter || isTrainerForMe || isOwningOam) {
+                playChime();
+                alert(`NOTIFICATION: TL acknowledged coaching for Request ${qa.request_id}.`);
+              }
+            }
+
+            if (agentAckChanged && qa.agent_ack_status === 'pending') {
+              if (me.role === 'agent' && req.agent_id === me.person_id) {
+                playChime();
+                alert(`NOTIFICATION: Coaching logged for Request ${qa.request_id}. Please acknowledge in your My Coaching tab.`);
+              }
+            }
+
+            if (agentAckChanged && qa.agent_ack_status === 'acknowledged') {
+              const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
+              const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
+              const isAgentTl = me.role === 'tl' && me.person_id === reqTl;
+              if (isQaSubmitter || isTrainerForMe || isOwningOam || isAgentTl) {
+                playChime();
+                alert(`NOTIFICATION: Agent acknowledged coaching for Request ${qa.request_id}.`);
               }
             }
           }
@@ -288,6 +322,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         .eq('agent_id', me.person_id).order('created_at', { ascending:false }).limit(50);
       agentReqs = data || [];
 
+      const { data: qaData } = await sb.from('qa_reviews').select('*').eq('agent_ack_status', 'pending');
+      qaReviews = qaData || [];
+
       const { data: arcAgentData } = await sb.from('archive_requests').select('*')
         .eq('agent_id', me.person_id).order('created_at', {ascending: false});
       archivedReqs = arcAgentData || [];
@@ -306,8 +343,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     $('#nv').innerHTML = TABS[me.role].map(t =>
       `<button class="${t===tab?'on':''}" onclick="setTab('${t}')">${t}</button>`).join('');
     const V = {
-      'Request': viewAgentRequest, 'My requests': viewAgentHistory,
-      'Board': viewTLBoard, 'My team': viewTLTeam, 'History': viewTLHistory,
+      'Request': viewAgentRequest, 'My requests': viewAgentHistory, 'My Coaching': viewAgentCoaching,
+      'Board': viewTLBoard, 'TL Acknowledgements': viewTLAcknowledgements, 'My team': viewTLTeam, 'History': viewTLHistory,
       'Dashboard': viewDash,
       'Config': viewConfig, 'Roster': viewRoster, 'Hierarchy': viewHierarchy, 'Assignments': viewAssignments, 'Reporting': viewReporting, 'Data Management': viewDataManagement, 'Anomalies': viewAnoms, 'Audit': viewAudit,
       'QA Queue': viewQAQueue,
@@ -405,6 +442,42 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     ${agentReqs.filter(r => ['pending','claimed'].includes(r.status)).map(agentCard).join('') || '<p class="mu">None pending.</p>'}`;
   }
 
+  function viewAgentCoaching() {
+    const pendingCoaching = qaReviews.filter(q => q.agent_ack_status === 'pending');
+    
+    return `
+      <h2>My Coaching & Acknowledgements</h2>
+      <p class="mu">Review coaching sessions completed by your Team Leader. You must acknowledge that you understand the feedback and next steps.</p>
+      <div id="agentAckForm"></div>
+      <div class="tw" style="margin-top:10px;"><table><thead><tr>
+        <th>Request</th><th>Date Logged</th><th>Summary</th><th>Action</th>
+      </tr></thead><tbody>
+        ${pendingCoaching.map(q => {
+          return `<tr>
+            <td><b>${q.request_id}</b></td>
+            <td>${dtd(q.tl_ack_at || q.created_at)}</td>
+            <td><strong>Coaching completed on ${dtd(q.tl_ack_at || q.created_at)}.</strong> Please acknowledge you understand.</td>
+            <td><button class="b" onclick="acknowledgeAsAgent('${q.review_id}')">I Understand & Acknowledge</button></td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="4" class="mu">You have no pending coaching acknowledgements.</td></tr>'}
+      </tbody></table></div>
+    `;
+  }
+
+  window.acknowledgeAsAgent = async (reviewId) => {
+    if (!confirm("By clicking OK, you confirm you have received this coaching and understand the next steps required.")) return;
+    
+    const { error } = await sb.from('qa_reviews').update({
+      agent_ack_status: 'acknowledged',
+      agent_ack_at: new Date().toISOString(),
+      updated_by: me.person_id
+    }).eq('review_id', reviewId);
+    
+    if (error) return alert(error.message);
+    alert('Coaching acknowledged successfully!');
+    await refresh();
+  };
+
   function agentCard(r) {
     const cls = r.status === 'claimed' ? 'claimed' : 'urgent';
     return `<div class="req ${cls}">
@@ -465,6 +538,79 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <h2>Claimed by others</h2>
       ${claimedByOthers.map(tlCard).join('') || '<p class="mu">Nothing.</p>'}`;
   }
+
+  function viewTLAcknowledgements() {
+    const pendingAcks = qaReviews.filter(q => {
+      if (q.qa_result !== 'fail') return false;
+      if (q.tl_ack_status !== 'pending') return false;
+      if (!['reviewed', 'actioned'].includes(q.oam_status)) return false; // OAM must finish first
+      
+      const req = reqs.find(r => r.request_id === q.request_id);
+      if (!req) return false;
+      return req.agent_team_tl_id === me.person_id;
+    });
+
+    return `
+      <h2>Coaching Acknowledgements</h2>
+      <p class="mu">Review next steps provided by the OAM, carry out the coaching, and acknowledge to close the loop.</p>
+      <div id="tlAckForm"></div>
+      <div class="tw" style="margin-top:10px;"><table><thead><tr>
+        <th>Request</th><th>QA Result</th><th>OAM Next Steps</th><th>Action</th>
+      </tr></thead><tbody>
+        ${pendingAcks.map(q => {
+          let oamNotes = q.oam_notes ? esc(q.oam_notes) : 'None provided';
+          return `<tr>
+            <td><b>${q.request_id}</b></td>
+            <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
+            <td style="white-space:normal;min-width:250px;"><div style="padding-left:10px;border-left:2px solid var(--nv);">${oamNotes}</div></td>
+            <td><button class="b" onclick="openTLAcknowledgement('${q.review_id}')">Review & Acknowledge</button></td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="4" class="mu">You have no pending coaching acknowledgements.</td></tr>'}
+      </tbody></table></div>
+    `;
+  }
+
+  window.openTLAcknowledgement = (reviewId) => {
+    const q = qaReviews.find(x => x.review_id === reviewId);
+    
+    document.getElementById('tlAckForm').innerHTML = `
+      <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
+        <h3>Coaching Action for Request: ${q.request_id}</h3>
+        
+        <div style="margin-bottom:10px; padding:10px; background:var(--bg); border-radius:6px;">
+          <strong>QA Insight:</strong> <span style="color:var(--ac)">${esc(q.qa_insights)}</span>
+          ${q.trainer_notes ? `<br><br><strong>Trainer Notes:</strong> ${esc(q.trainer_notes)}` : ''}
+          ${q.oam_notes ? `<br><br><strong>OAM Next Steps:</strong> ${esc(q.oam_notes)}` : ''}
+        </div>
+
+        <label style="margin-top:10px;display:block">Your Coaching Notes (1-on-1 carried out)
+          <textarea id="tlCoachNotes" placeholder="Log your coaching session with the agent here..."></textarea>
+        </label>
+        
+        <p>
+          <button class="b" style="background:var(--ok)" onclick="submitTLAcknowledgement('${q.review_id}')">Coaching Carried Out — Send to Agent for Ack</button> 
+          <button class="s" onclick="document.getElementById('tlAckForm').innerHTML=''">Cancel</button>
+        </p>
+      </div>
+    `;
+  };
+
+  window.submitTLAcknowledgement = async (reviewId) => {
+    const notes = $('#tlCoachNotes').value;
+    
+    const { error } = await sb.from('qa_reviews').update({
+      tl_ack_status: 'acknowledged',
+      tl_ack_at: new Date().toISOString(),
+      agent_ack_status: 'pending',
+      trainer_notes: notes ? `[TL Coaching Log]: ${notes}` : undefined,
+      updated_by: me.person_id
+    }).eq('review_id', reviewId);
+    
+    if (error) return alert(error.message);
+    alert('Coaching sent to Agent for acknowledgement!');
+    $('#tlAckForm').innerHTML = '';
+    await refresh();
+  };
 
   function viewTLTeam() {
     return '<p class="mu">Team roster — see Admin → Roster.</p>';
@@ -877,14 +1023,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.exportHistoryToCSV = () => {
     if (qaReviews.length === 0) return alert('No history to export.');
     
-    const headers = ['Request ID', 'QA Insight', 'QA Result', 'Severity', 'Check: Justification', 'Check: Policy', 'Check: PNR', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes', 'Coaching Date', 'Coaching Type'];
+    const headers = ['Request ID', 'QA Insight', 'QA Result', 'Severity', 'Check: Justification', 'Check: Policy', 'Check: PNR', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes', 'Coaching Date', 'Coaching Type', 'TL Ack Status', 'Agent Ack Status'];
     const rows = qaReviews.map(q => [
       q.request_id, q.qa_insights, q.qa_result, q.severity,
       q.checked_justification ? 'Yes' : 'No',
       q.checked_policy ? 'Yes' : 'No',
       q.checked_pnr ? 'Yes' : 'No',
       q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || '',
-      q.coaching_date || '', q.coaching_type || ''
+      q.coaching_date || '', q.coaching_type || '',
+      q.tl_ack_status || 'pending', q.agent_ack_status || 'not_sent'
     ]);
     
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -907,7 +1054,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <h2 style="margin:0;">Actioned Review History</h2>
         <button class="s" onclick="exportHistoryToCSV()">⬇ Download CSV</button>
       </div>
-      <p class="mu">Full 360-degree view of QA, Training, and OAM interventions.</p>
+      <p class="mu">Full 360-degree view of QA, Training, OAM interventions, and closing acknowledgements.</p>
       <div class="tw"><table><thead><tr>
         <th>Request ID</th><th>QA Result</th><th>Checklist</th><th>Trainer Status</th><th>OAM Status</th><th>Combined Notes (Timeline)</th>
       </tr></thead><tbody>
@@ -923,8 +1070,17 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           }
           
           if (q.oam_notes) {
-            combinedNotes += `<div style="padding-left:10px; border-left:2px solid var(--nv);">
+            combinedNotes += `<div style="margin-bottom:6px; padding-left:10px; border-left:2px solid var(--nv);">
               <strong>OAM:</strong> ${esc(q.oam_notes)}
+            </div>`;
+          }
+
+          if (q.qa_result === 'fail') {
+            const tlAckStr = q.tl_ack_status === 'acknowledged' ? `<span style="color:var(--ok)">✅ TL Acknowledged (${dtd(q.tl_ack_at)})</span>` : `<span class="mu">⏳ Awaiting TL Ack</span>`;
+            const agentAckStr = q.agent_ack_status === 'acknowledged' ? `<span style="color:var(--ok)">✅ Agent Acknowledged (${dtd(q.agent_ack_at)})</span>` : (q.agent_ack_status === 'pending' ? `<span class="mu">⏳ Awaiting Agent Ack</span>` : `<span class="mu" style="opacity:0.5">-</span>`);
+            
+            combinedNotes += `<div style="padding-left:10px; border-left:2px solid var(--ok); margin-top:6px; font-size:11px;">
+              ${tlAckStr}<br>${agentAckStr}
             </div>`;
           }
 
@@ -1697,6 +1853,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       headers = ['Request ID', 'QA Result', 'Coaching Date', 'Coaching Type', 'Trainer Notes'];
       rows = qaReviews.filter(q => q.qa_result === 'fail').map(q => [q.request_id, q.qa_result, q.coaching_date || '', q.coaching_type || '', q.trainer_notes || '']);
       filename = 'coaching_log.csv';
+    } else if (type === 'qa_lifecycle') {
+      headers = ['Request ID', 'Agent ID', 'QA Result', 'QA Insight', 'Trainer Status', 'Trainer Notes', 'OAM Status', 'OAM Notes', 'TL Ack', 'TL Ack Date', 'Agent Ack', 'Agent Ack Date'];
+      rows = qaReviews.filter(q => q.qa_result === 'fail').map(q => [
+        q.request_id, 
+        reqs.find(r=>r.request_id===q.request_id)?.agent_id || '', 
+        q.qa_result, q.qa_insights, q.trainer_status, q.trainer_notes || '', q.oam_status, q.oam_notes || '', 
+        q.tl_ack_status || 'pending', q.tl_ack_at || '', q.agent_ack_status || 'not_sent', q.agent_ack_at || ''
+      ]);
+      filename = 'qa_lifecycle.csv';
     } else if (type === 'archived') {
       headers = ['Request ID', 'Agent ID', 'TL ID', 'Amount', 'Status', 'Date'];
       rows = archivedReqs.map(r => [r.request_id, r.agent_id, r.agent_team_tl_id, r.amount, r.status, r.created_at]);
@@ -1746,6 +1911,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <button class="b" onclick="downloadReport('all_requests')">⬇ Export All Live Requests</button>
           <button class="b" onclick="downloadReport('qa_history')">⬇ Export QA History</button>
           <button class="b" onclick="downloadReport('coaching_log')">⬇ Export Coaching Log</button>
+          <button class="b" onclick="downloadReport('qa_lifecycle')">⬇ Export QA Lifecycle</button>
           <button class="b" onclick="downloadReport('archived')">⬇ Export Archived Data</button>
         </div>
       </div>
