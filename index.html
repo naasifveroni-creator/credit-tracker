@@ -535,7 +535,77 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
+    // === OAM DASHBOARD (or QA/Trainer KPIs) — early-return block ===
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
+      // If an OAM has drilled into a TL, render the agent list instead of the KPI dashboard
+      if (me.role === 'oam' && drillDown && drillDown.level === 'tl') {
+        const tlObj = tls.find(t => t.tl_id === drillDown.id);
+        // SCOPE GUARD: OAM can only view TLs under their own OAM id
+        if (!tlObj || tlObj.oam_id !== me.oam_id) {
+          return `
+            <p><button class="s" onclick="clearDrillDown()">← Back to My Dashboard</button></p>
+            <div class="card"><b style="color:var(--ac)">Not authorized.</b> This team is not under your supervision.</div>
+          `;
+        }
+
+        // Request stats per agent for this TL (from reqs already loaded)
+        const tlReqs = reqs.filter(r => r.agent_team_tl_id === drillDown.id);
+        const statsByAgent = {};
+        tlReqs.forEach(r => {
+          if (!statsByAgent[r.agent_id]) statsByAgent[r.agent_id] = { total: 0, approved: 0, rejected: 0 };
+          statsByAgent[r.agent_id].total++;
+          if (r.status === 'approved') statsByAgent[r.agent_id].approved++;
+          if (r.status === 'rejected') statsByAgent[r.agent_id].rejected++;
+        });
+
+        // Async roster load into #oamAgentList after render
+        setTimeout(async () => {
+          const el = document.getElementById('oamAgentList');
+          if (!el) return;
+          const { data: roster } = await sb.from('agents').select('*').eq('tl_id', drillDown.id);
+          const agents = roster || [];
+
+          if (agents.length === 0) {
+            el.innerHTML = '<p class="mu">No agents are assigned to this TL.</p>';
+            return;
+          }
+
+          const rows = agents.map(a => {
+            const s = statsByAgent[a.agent_id] || { total: 0, approved: 0, rejected: 0 };
+            const rate = (s.approved + s.rejected) > 0 ? Math.round((s.approved / (s.approved + s.rejected)) * 100) + '%' : '—';
+            // Last activity: latest request created_at for this agent, else dash
+            const agentReqDates = tlReqs.filter(r => r.agent_id === a.agent_id).map(r => r.created_at).filter(Boolean);
+            const lastActivity = agentReqDates.length ? dtd(new Date(Math.max(...agentReqDates.map(d => +new Date(d)))).toISOString()) : '—';
+            return `<tr>
+              <td>${esc(a.name)}</td>
+              <td>${esc(a.agent_id)}</td>
+              <td>${s.total}</td>
+              <td><span style="color:var(--ok)">${s.approved}</span></td>
+              <td><span style="color:var(--ac)">${s.rejected}</span></td>
+              <td>${rate}</td>
+              <td>${lastActivity}</td>
+              <td><button class="s" onclick="openAgentQAHistory('${esc(a.agent_id)}')">QA Scorecard</button></td>
+            </tr>`;
+          }).join('');
+
+          el.innerHTML = `
+            <div class="tw"><table><thead><tr>
+              <th>Agent Name</th><th>Agent ID</th><th>Total Requests</th><th>Approved</th><th>Rejected</th><th>Approval Rate</th><th>Last Activity</th><th>QA</th>
+            </tr></thead><tbody>
+              ${rows}
+            </tbody></table></div>
+          `;
+        }, 0);
+
+        return `
+          <p><button class="s" onclick="clearDrillDown()">← Back to My Dashboard</button></p>
+          <h2>Team: ${esc(tlObj.name)} (${esc(tlObj.tl_id)})</h2>
+          <p class="mu">All agents reporting to this Team Leader — regardless of whether they have live requests.</p>
+          <div id="oamAgentList"><p class="mu">Loading agents…</p></div>
+          <div id="oamQaHistoryModal"></div>
+        `;
+      }
+
       let myTls = [];
       
       if (me.role === 'qa' || me.role === 'trainer') {
@@ -560,10 +630,14 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         const tlApproved = tlReqs.filter(r => r.status === 'approved').length;
         const tlDecided = tlReqs.filter(r => ['approved', 'rejected'].includes(r.status)).length;
         const rate = tlDecided > 0 ? Math.round((tlApproved / tlDecided) * 100) + '%' : '—';
+        const actionCell = me.role === 'oam'
+          ? `<td><button class="s" onclick="setDrillDown('tl', '${esc(t.tl_id)}')">View Agents</button></td>`
+          : '';
         return `<tr>
           <td>${esc(t.name)} (${esc(t.tl_id)})</td>
           <td>${tlReqs.length}</td>
           <td>${rate}</td>
+          ${actionCell}
         </tr>`;
       }).join('');
 
@@ -577,9 +651,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
         <h2>TL Rollup</h2>
         <div class="tw"><table><thead><tr>
-          <th>Team Leader</th><th>Requests</th><th>Approval Rate</th>
+          <th>Team Leader</th><th>Requests</th><th>Approval Rate</th>${me.role === 'oam' ? '<th>Action</th>' : ''}
         </tr></thead><tbody>
-          ${tlRollup || '<tr><td colspan="3" class="mu">No TLs found.</td></tr>'}
+          ${tlRollup || `<tr><td colspan="${me.role === 'oam' ? 4 : 3}" class="mu">No TLs found.</td></tr>`}
         </tbody></table></div>
 
         <h2>Cross-TL Approvals (Coverage)</h2>
@@ -708,6 +782,67 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       </tbody></table></div>
     `;
   }
+
+  // NEW: OAM in-line QA scorecard view for a specific agent
+  window.openAgentQAHistory = (agentId) => {
+    const el = document.getElementById('oamQaHistoryModal');
+    if (!el) return;
+
+    // Find all request_ids for this agent, then filter qaReviews
+    const agentReqIds = new Set(reqs.filter(r => r.agent_id === agentId).map(r => r.request_id));
+    const agentQa = qaReviews.filter(q => agentReqIds.has(q.request_id));
+
+    if (agentQa.length === 0) {
+      el.innerHTML = `
+        <div class="card" style="margin-top:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">QA History — ${esc(agentId)}</h3>
+            <button class="s" onclick="document.getElementById('oamQaHistoryModal').innerHTML=''">Close</button>
+          </div>
+          <p class="mu" style="margin-top:8px;">No QA reviews logged for this agent yet.</p>
+        </div>`;
+      return;
+    }
+
+    const rows = agentQa.map(q => {
+      let combined = `<div style="margin-bottom:6px;"><strong>QA:</strong> ${esc(q.qa_insights || '')}</div>`;
+      if (q.trainer_notes) {
+        combined += `<div style="margin-bottom:6px;padding-left:10px;border-left:2px solid var(--wn);">
+          <strong>Trainer (${q.coaching_date ? dtd(q.coaching_date) : q.trainer_status}):</strong> ${esc(q.trainer_notes)}
+          ${q.coaching_type ? `<br><span class="mu">Type: ${esc(q.coaching_type)}</span>` : ''}
+        </div>`;
+      }
+      if (q.oam_notes) {
+        combined += `<div style="padding-left:10px;border-left:2px solid var(--nv);">
+          <strong>OAM:</strong> ${esc(q.oam_notes)}
+        </div>`;
+      }
+      return `<tr>
+        <td><b>${esc(q.request_id)}</b></td>
+        <td>
+          <span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${(q.qa_result||'').toUpperCase()}</span>
+          ${q.qa_result === 'fail' ? `<br><span class="pill ${q.severity === 'critical' ? 's-rejected' : 's-pending'}" style="font-size:10px;margin-top:4px;display:inline-block;">${(q.severity || 'minor').toUpperCase()}</span>` : ''}
+        </td>
+        <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${esc(q.trainer_status)}</span></td>
+        <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${esc(q.oam_status)}</span></td>
+        <td style="min-width:280px;white-space:normal;font-size:12px;">${combined}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="card" style="margin-top:14px;border:2px solid var(--nv);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="margin:0;">QA History — ${esc(agentId)}</h3>
+          <button class="s" onclick="document.getElementById('oamQaHistoryModal').innerHTML=''">Close</button>
+        </div>
+        <div class="tw" style="margin-top:10px;"><table><thead><tr>
+          <th>Request</th><th>QA Result</th><th>Trainer Status</th><th>OAM Status</th><th>Timeline</th>
+        </tr></thead><tbody>
+          ${rows}
+        </tbody></table></div>
+      </div>
+    `;
+  };
 
   // ============ QA & TRAINER VIEWS ============
   
