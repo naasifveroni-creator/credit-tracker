@@ -686,28 +686,45 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <h2 style="margin:0;">Actioned Review History</h2>
         <button class="s" onclick="exportHistoryToCSV()">⬇ Download CSV</button>
       </div>
-      <p class="mu">Track the full lifecycle of QA fails and coaching actions.</p>
+      <p class="mu">Full 360-degree view of QA, Training, and OAM interventions.</p>
       <div class="tw"><table><thead><tr>
-        <th>Request ID</th><th>QA Insight</th><th>Severity</th><th>QA Result</th><th>Checklist</th><th>Trainer Status</th><th>Coach Details</th><th>OAM Status</th><th>OAM Notes</th>
+        <th>Request ID</th><th>QA Result</th><th>Checklist</th><th>Trainer Status</th><th>OAM Status</th><th>Combined Notes (Timeline)</th>
       </tr></thead><tbody>
-        ${qaReviews.map(q => `<tr>
-          <td><b>${q.request_id}</b></td>
-          <td>${esc(q.qa_insights)}</td>
-          <td>${q.qa_result === 'pass' ? '<span class="pill s-approved">PASS</span>' : `<span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span>`}</td>
-          <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
-          <td style="font-size:11px;">
-            ${q.checked_justification ? '✅' : '❌'} Justification <br>
-            ${q.checked_policy ? '✅' : '❌'} Policy <br>
-            ${q.checked_pnr ? '✅' : '❌'} PNR
-          </td>
-          <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
-          <td style="font-size:11px;">
-            ${q.coaching_date ? '📅 ' + dtd(q.coaching_date) + '<br>' : ''}
-            ${q.coaching_type ? '📋 ' + q.coaching_type : (q.trainer_notes || '—')}
-          </td>
-          <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
-          <td>${esc(q.oam_notes || '—')}</td>
-        </tr>`).join('')}
+        ${qaReviews.map(q => {
+          
+          let combinedNotes = `<div style="margin-bottom:6px;"><strong>QA:</strong> ${esc(q.qa_insights)}</div>`;
+          
+          if (q.trainer_notes) {
+            combinedNotes += `<div style="margin-bottom:6px; padding-left:10px; border-left:2px solid var(--wn);">
+              <strong>Trainer (${q.coaching_date ? dtd(q.coaching_date) : q.trainer_status}):</strong> ${esc(q.trainer_notes)}
+              ${q.coaching_type ? `<br><span class="mu">Type: ${esc(q.coaching_type)}</span>` : ''}
+            </div>`;
+          }
+          
+          if (q.oam_notes) {
+            combinedNotes += `<div style="padding-left:10px; border-left:2px solid var(--nv);">
+              <strong>OAM:</strong> ${esc(q.oam_notes)}
+            </div>`;
+          }
+
+          return `<tr>
+            <td><b>${q.request_id}</b></td>
+            <td>
+              <span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span>
+              ${q.qa_result === 'fail' ? `<br><span class="pill ${q.severity === 'critical' ? 's-rejected' : 's-pending'}" style="font-size:10px; margin-top:4px; display:inline-block;">${(q.severity || 'minor').toUpperCase()}</span>` : ''}
+            </td>
+            <td style="font-size:11px; line-height:1.6;">
+              ${q.checked_justification ? '✅' : '❌'} Justification <br>
+              ${q.checked_policy ? '✅' : '❌'} Policy <br>
+              ${q.checked_pnr ? '✅' : '❌'} PNR
+            </td>
+            <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
+            <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
+            <td style="min-width:300px; white-space:normal; font-size:12px;">
+              ${combinedNotes}
+            </td>
+          </tr>`
+        }).join('')}
       </tbody></table></div>
     `;
   }
@@ -934,29 +951,45 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
   window.openCoachingAction = (reviewId) => {
     const q = qaReviews.find(x => x.review_id === reviewId);
+    
+    let previousNotesHtml = `
+      <div style="margin-bottom:10px; padding:10px; background:var(--bg); border-radius:6px;">
+        <strong>QA Insight:</strong> <span style="color:var(--ac)">${esc(q.qa_insights)}</span>
+    `;
+    if (q.trainer_notes) {
+      previousNotesHtml += `<br><br><strong>Trainer Notes (${esc(q.trainer_status)}):</strong> ${esc(q.trainer_notes)}`;
+    }
+    if (q.oam_notes) {
+      previousNotesHtml += `<br><br><strong>OAM Notes (${esc(q.oam_status)}):</strong> ${esc(q.oam_notes)}`;
+    }
+    previousNotesHtml += `</div>`;
+
     document.getElementById('coachingForm').innerHTML = `
       <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
         <h3>Coaching Action for Request: ${q.request_id}</h3>
-        <div class="notes" style="color:var(--ac)">QA Insight: ${esc(q.qa_insights)}</div>
         
+        ${previousNotesHtml}
+
         <div class="row" style="margin-top:10px;">
           <label>Status<select id="coachStatus">
             <option value="reviewed">Reviewed</option>
             <option value="actioned">Actioned / Coached</option>
           </select></label>
           ${me.role === 'trainer' ? `
-            <label>Coaching Date<input type="date" id="coachDate" style="width:140px;"></label>
+            <label>Coaching Date<input type="date" id="coachDate" style="width:140px;" value="${q.coaching_date || ''}"></label>
             <label>Coaching Type<select id="coachType">
               <option value="">-- Select --</option>
-              <option>1-on-1</option>
-              <option>Team Huddle</option>
-              <option>Refresher Training</option>
+              <option ${q.coaching_type === '1-on-1' ? 'selected' : ''}>1-on-1</option>
+              <option ${q.coaching_type === 'Team Huddle' ? 'selected' : ''}>Team Huddle</option>
+              <option ${q.coaching_type === 'Refresher Training' ? 'selected' : ''}>Refresher Training</option>
             </select></label>
           ` : ''}
         </div>
-        <label style="margin-top:10px;display:block">Trainer/OAM Notes
-          <textarea id="coachNotes" placeholder="e.g. 1-on-1 completed with TL. Sent updated SOP."></textarea>
+        
+        <label style="margin-top:10px;display:block">Add Your Notes (${me.role.toUpperCase()})
+          <textarea id="coachNotes" placeholder="Type your notes here. QA, Training, and OAM will all see this."></textarea>
         </label>
+        
         <p><button class="b" onclick="submitCoachingAction('${q.review_id}')">Update Status</button> 
         <button class="s" onclick="document.getElementById('coachingForm').innerHTML=''">Cancel</button></p>
       </div>
