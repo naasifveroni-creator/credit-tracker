@@ -77,6 +77,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let me = null, tab = null, reqs = [], agentReqs = [], archivedReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], allAgents = [], auditEvents = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
+  let qaShowAll = false; // For testing override
   
   // GLOBAL SEARCH MEMORY
   let qaFilterAgent = '';
@@ -213,9 +214,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
           const isActor = qa.updated_by && qa.updated_by === me.person_id;
 
-          // === QA REVIEW INSERTED (QA just submitted) ===
+          // === QA REVIEW INSERTED ===
           if (payload.eventType === 'INSERT') {
-            if (isActor) return; // suppress submitter
+            if (isActor) return;
             const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
             const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
             if (isTrainerForMe || isOwningOam) {
@@ -227,9 +228,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
           // === QA REVIEW UPDATED ===
           if (payload.eventType === 'UPDATE') {
-            if (isActor) return; // suppress actor
+            if (isActor) return;
 
-            // We use payload.old to check what was actually just saved
             const trainerChanged = qa.trainer_status !== payload.old.trainer_status;
             const oamChanged = qa.oam_status !== payload.old.oam_status;
             const tlAckChanged = qa.tl_ack_status !== payload.old.tl_ack_status;
@@ -245,17 +245,18 @@ textarea{width:100%;min-height:80px;font-family:inherit}
               }
             }
 
-            if (oamChanged) {
+            // Bulletproof OAM -> TL Notification
+            if (oamChanged || (qa.oam_status === 'actioned' && payload.old.oam_status !== 'actioned')) {
               const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
               const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
               const isAgentTl = me.role === 'tl' && me.person_id === reqTl;
               const isApprovingTl = me.role === 'tl' && me.person_id === req.approved_by_tl_id;
+              
               if (isQaSubmitter || isTrainerForMe || isAgentTl || isApprovingTl) {
                 playChime();
                 alert(`NOTIFICATION: OAM updated review for ${qa.request_id}.\nOAM status: ${(qa.oam_status||'').toUpperCase()}`);
               }
               
-              // Bulletproof TL Notification
               if (qa.qa_result === 'fail' && ['reviewed', 'actioned'].includes(qa.oam_status) && qa.tl_ack_status === 'pending' && me.role === 'tl' && me.person_id === reqTl) {
                 playChime();
                 alert(`NOTIFICATION: OAM has provided next steps for Request ${qa.request_id}. Please review and acknowledge in your TL Acknowledgements tab.`);
@@ -547,7 +548,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const pendingAcks = qaReviews.filter(q => {
       if (q.qa_result !== 'fail') return false;
       if (q.tl_ack_status !== 'pending') return false;
-      if (!['reviewed', 'actioned'].includes(q.oam_status)) return false; // OAM must finish first
+      if (!['reviewed', 'actioned'].includes(q.oam_status)) return false;
       
       const req = reqs.find(r => r.request_id === q.request_id);
       if (!req) return false;
@@ -685,12 +686,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   window.clearDrillDown = () => { drillDown = null; render(); };
 
   function viewDash() {
-    // === OAM DASHBOARD (or QA/Trainer KPIs) — early-return block ===
     if (me.role === 'oam' || me.role === 'qa' || me.role === 'trainer') {
-      // If an OAM has drilled into a TL, render the agent list instead of the KPI dashboard
       if (me.role === 'oam' && drillDown && drillDown.level === 'tl') {
         const tlObj = tls.find(t => t.tl_id === drillDown.id);
-        // SCOPE GUARD: OAM can only view TLs under their own OAM id
         if (!tlObj || tlObj.oam_id !== me.oam_id) {
           return `
             <p><button class="s" onclick="clearDrillDown()">← Back to My Dashboard</button></p>
@@ -698,7 +696,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           `;
         }
 
-        // Request stats per agent for this TL (from reqs already loaded)
         const tlReqs = reqs.filter(r => r.agent_team_tl_id === drillDown.id);
         const statsByAgent = {};
         tlReqs.forEach(r => {
@@ -708,7 +705,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           if (r.status === 'rejected') statsByAgent[r.agent_id].rejected++;
         });
 
-        // Async roster load into #oamAgentList after render
         setTimeout(async () => {
           const el = document.getElementById('oamAgentList');
           if (!el) return;
@@ -723,7 +719,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           const rows = agents.map(a => {
             const s = statsByAgent[a.agent_id] || { total: 0, approved: 0, rejected: 0 };
             const rate = (s.approved + s.rejected) > 0 ? Math.round((s.approved / (s.approved + s.rejected)) * 100) + '%' : '—';
-            // Last activity: latest request created_at for this agent, else dash
             const agentReqDates = tlReqs.filter(r => r.agent_id === a.agent_id).map(r => r.created_at).filter(Boolean);
             const lastActivity = agentReqDates.length ? dtd(new Date(Math.max(...agentReqDates.map(d => +new Date(d)))).toISOString()) : '—';
             return `<tr>
@@ -933,12 +928,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     `;
   }
 
-  // NEW: OAM in-line QA scorecard view for a specific agent
   window.openAgentQAHistory = (agentId) => {
     const el = document.getElementById('oamQaHistoryModal');
     if (!el) return;
 
-    // Find all request_ids for this agent, then filter qaReviews
     const agentReqIds = new Set(reqs.filter(r => r.agent_id === agentId).map(r => r.request_id));
     const agentQa = qaReviews.filter(q => agentReqIds.has(q.request_id));
 
@@ -994,8 +987,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     `;
   };
 
-  // ============ QA & TRAINER VIEWS ============
-  
   window.applyQaFilter = () => {
     qaFilterAgent = $('#qaFilterAgent') ? $('#qaFilterAgent').value : '';
     qaFilterTl = $('#qaFilterTl') ? $('#qaFilterTl').value : '';
@@ -1113,7 +1104,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   function viewQAQueue() {
     const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
     
-    // USE GLOBAL MEMORY FOR FILTERS
     const curAgent = window.memQaAgent || '';
     const curTl = window.memQaTl || '';
     const curReason = window.memQaReason || '';
@@ -1121,12 +1111,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const pendingQA = reqs.filter(r => {
       const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
       const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
+      
+      if (qaShowAll) return isPending; // Override for testing
       return isPending && isAssignedToMe;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
 
-    // Schedule a one-time filter application after render (no timer)
     setTimeout(() => { if (typeof window.filterQaTable === 'function') window.filterQaTable(); }, 0);
 
     return `
@@ -1146,6 +1137,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
         <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
+        ${myTlIds.length > 0 ? `<button class="s" onclick="qaShowAll = !qaShowAll; render()" style="margin-left:auto;">${qaShowAll ? 'Show My Team Only' : 'Show All Requests (Override)'}</button>` : ''}
       </div>
 
       <div class="tw"><table><thead><tr>
@@ -1453,7 +1445,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const oamOpts = oams.map(o => `<option value="${o.oam_id}">${esc(o.name)}</option>`).join('');
     const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
 
-    // Generate the Move Dropdowns
     const oamMoveOpts = (currentOm) => ['RAMCHANDRA NAIDOO', 'CHARLENE EBRAHIM'].map(om => `<option value="${om}" ${om === currentOm ? 'selected' : ''}>${om}</option>`).join('');
     const tlMoveOpts = (currentOam) => oams.map(o => `<option value="${o.oam_id}" ${o.oam_id === currentOam ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
     const agentMoveOpts = (currentTl) => tls.map(t => `<option value="${t.tl_id}" ${t.tl_id === currentTl ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
@@ -1533,7 +1524,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <button class="b" onclick="addStaff('agent')">Add Agent</button>
         </div>
 
-        <!-- NEW SEARCH/FILTER BAR FOR AGENTS -->
         <div class="row" style="margin-top: 15px; padding: 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--bd);">
           <label>Search Agent (Name or ID)<input type="text" id="adminAgSearch" oninput="filterAdminAgents()" placeholder="Type to search..." value="${window.adminAgentSearchText || ''}"></label>
           <label>Filter by TL<select id="adminAgFilterTl" onchange="filterAdminAgents()">
@@ -1567,7 +1557,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const search = searchInput.value.toLowerCase();
     const tlFilter = tlInput.value;
     
-    // Save to memory
     window.adminAgentSearchText = search;
     window.adminAgentFilterTl = tlFilter;
 
@@ -1794,8 +1783,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     return html;
   }
 
-  // ============ ADMIN ASSIGNMENTS & REPORTING ============
-  
   window.assignTeam = async (staffId, tlId) => {
     const { error } = await sb.from('team_assignments').insert({ staff_id: staffId, staff_role: staffId.startsWith('QA') ? 'qa' : 'trainer', tl_id: tlId });
     if (error) alert(error.message); else { alert('Team assigned!'); const { data } = await sb.from('team_assignments').select('*'); assignments = data || []; render(); }
