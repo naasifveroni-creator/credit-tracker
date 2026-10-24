@@ -186,8 +186,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           }
 
           if (payload.eventType === 'UPDATE' && me.role === 'qa' && ['approved','rejected'].includes(payload.new.status) && !['approved','rejected'].includes(payload.old.status)) {
-            playChime();
-            alert(`NOTIFICATION: Request ${payload.new.request_id} is ready for QA review.`);
+            const reqTl = payload.new.agent_team_tl_id;
+            const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
+            const isForMe = myTlIds.length === 0 || myTlIds.includes(reqTl);
+            if (isForMe) {
+              playChime();
+              alert(`NOTIFICATION: Request ${payload.new.request_id} is ready for QA review.`);
+            }
           }
         })
       .on('postgres_changes', { event:'*', schema:'public', table:'qa_reviews' },
@@ -1093,15 +1098,16 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewQAQueue() {
+    const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
+    
     const curAgent = window.memQaAgent || '';
     const curTl = window.memQaTl || '';
     const curReason = window.memQaReason || '';
 
-    // Bulletproof filter: Shows all approved/rejected requests without a review yet.
     const pendingQA = reqs.filter(r => {
-      const tlActioned = r.status === 'approved' || r.status === 'rejected';
-      const hasNoReview = !qaReviews.find(q => q.request_id === r.request_id);
-      return tlActioned && hasNoReview;
+      const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
+      const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
+      return isPending && isAssignedToMe;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
@@ -1125,6 +1131,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
         <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
+        <button class="b" style="margin-left:auto;" onclick="refresh()">🔄 Force Refresh Queue</button>
       </div>
 
       <div class="tw"><table><thead><tr>
@@ -1138,7 +1145,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <td>${esc(r.reason_code)}</td>
           <td><span class="pill s-${r.status}">${r.status}</span></td>
           <td><button class="b" onclick="openQAReview('${r.request_id}')">Review</button></td>
-        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found for your assigned teams.</td></tr>'}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
@@ -1280,12 +1287,14 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       : null;
       
     const pendingActions = qaReviews.filter(q => {
-      if (me.role === 'trainer' && q.trainer_status !== 'pending') return false;
-      if (me.role === 'oam' && !['pending', 'reviewed'].includes(q.oam_status)) return false; // Fixed for OAM
-      
       if (me.role === 'trainer') {
+        if (q.trainer_status && q.trainer_status !== 'pending') return false;
         const req = reqs.find(r => r.request_id === q.request_id);
         if (req && myTlIds.length > 0 && !myTlIds.includes(req.agent_team_tl_id)) return false;
+      }
+      
+      if (me.role === 'oam') {
+        if (q.oam_status && !['pending', 'reviewed'].includes(q.oam_status)) return false;
       }
       
       return true;
@@ -1303,8 +1312,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
           <td>${q.qa_result === 'pass' ? '—' : `<span class="pill ${q.severity === 'critical' ? 's-rejected' : q.severity === 'major' ? 's-pending' : 's-deferred'}">${(q.severity || 'minor').toUpperCase()}</span>`}</td>
           <td>${esc(q.qa_insights)}</td>
-          <td><span class="pill ${q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status}</span></td>
-          <td><span class="pill ${q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status}</span></td>
+          <td><span class="pill ${!q.trainer_status || q.trainer_status === 'pending' ? 's-pending' : 's-approved'}">${q.trainer_status || 'pending'}</span></td>
+          <td><span class="pill ${!q.oam_status || q.oam_status === 'pending' ? 's-pending' : 's-approved'}">${q.oam_status || 'pending'}</span></td>
           <td><button class="b" onclick="openCoachingAction('${q.review_id}')">Action</button></td>
         </tr>`).join('') || '<tr><td colspan="7" class="mu">You have no pending actions.</td></tr>'}
       </tbody></table></div>
@@ -1374,8 +1383,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       
     const { error } = await sb.from('qa_reviews').update(updateData).eq('review_id', reviewId);
     
-    if (error) return alert(error.message);
-    alert('Action logged!');
+    if (error) return alert("DATABASE ERROR: " + error.message);
+    alert('Action logged successfully!');
     $('#coachingForm').innerHTML = '';
     await refresh();
   };
