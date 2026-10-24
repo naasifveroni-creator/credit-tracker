@@ -228,6 +228,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           // === QA REVIEW UPDATED ===
           if (payload.eventType === 'UPDATE') {
             if (isActor) return; // suppress actor
+
+            // We use payload.old to check what was actually just saved
             const trainerChanged = qa.trainer_status !== payload.old.trainer_status;
             const oamChanged = qa.oam_status !== payload.old.oam_status;
             const tlAckChanged = qa.tl_ack_status !== payload.old.tl_ack_status;
@@ -252,8 +254,10 @@ textarea{width:100%;min-height:80px;font-family:inherit}
                 playChime();
                 alert(`NOTIFICATION: OAM updated review for ${qa.request_id}.\nOAM status: ${(qa.oam_status||'').toUpperCase()}`);
               }
-              // NEW: Notify TL that OAM has actioned it and they need to review/acknowledge
+              
+              // Bulletproof TL Notification
               if (qa.qa_result === 'fail' && ['reviewed', 'actioned'].includes(qa.oam_status) && qa.tl_ack_status === 'pending' && me.role === 'tl' && me.person_id === reqTl) {
+                playChime();
                 alert(`NOTIFICATION: OAM has provided next steps for Request ${qa.request_id}. Please review and acknowledge in your TL Acknowledgements tab.`);
               }
             }
@@ -1556,8 +1560,12 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   window.filterAdminAgents = () => {
-    const search = $('#adminAgSearch').value.toLowerCase();
-    const tlFilter = $('#adminAgFilterTl').value;
+    const searchInput = $('#adminAgSearch');
+    const tlInput = $('#adminAgFilterTl');
+    if (!searchInput || !tlInput) return;
+
+    const search = searchInput.value.toLowerCase();
+    const tlFilter = tlInput.value;
     
     // Save to memory
     window.adminAgentSearchText = search;
@@ -1581,7 +1589,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     });
   };
 
-    setTimeout(() => {
+  setTimeout(() => {
     if (document.getElementById('adminAgSearch')) {
       filterAdminAgents();
     }
