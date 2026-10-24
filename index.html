@@ -1581,7 +1581,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     });
   };
 
-  setTimeout(filterAdminAgents, 50);
+    setTimeout(() => {
+    if (document.getElementById('adminAgSearch')) {
+      filterAdminAgents();
+    }
+  }, 50);
 
   function viewRoster() {
     return `
