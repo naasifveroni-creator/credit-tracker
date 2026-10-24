@@ -1089,6 +1089,11 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const oamOpts = oams.map(o => `<option value="${o.oam_id}">${esc(o.name)}</option>`).join('');
     const tlOpts = tls.map(t => `<option value="${t.tl_id}">${esc(t.name)}</option>`).join('');
 
+    // Generate the Move Dropdowns
+    const oamMoveOpts = (currentOm) => ['RAMCHANDRA NAIDOO', 'CHARLENE EBRAHIM'].map(om => `<option value="${om}" ${om === currentOm ? 'selected' : ''}>${om}</option>`).join('');
+    const tlMoveOpts = (currentOam) => oams.map(o => `<option value="${o.oam_id}" ${o.oam_id === currentOam ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+    const agentMoveOpts = (currentTl) => tls.map(t => `<option value="${t.tl_id}" ${t.tl_id === currentTl ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+
     return `
       <h2>Campaign Config</h2>
       <div class="card row">
@@ -1113,11 +1118,16 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <button class="b" onclick="addStaff('oam')">Add OAM</button>
         </div>
         <div class="tw" style="margin-top:10px"><table><thead><tr>
-          <th>OAM Name</th><th>Email</th><th>Action</th>
+          <th>OAM Name</th><th>Email</th><th>Move to OM</th><th>Action</th>
         </tr></thead><tbody>
           ${oams.map(o => `<tr>
             <td>${esc(o.name)} (${esc(o.oam_id)})</td>
             <td>${esc(o.email)}</td>
+            <td>
+              <select onchange="moveOam('${esc(o.oam_id)}', this.value)">
+                ${oamMoveOpts(o.om_id)}
+              </select>
+            </td>
             <td><button class="s r" onclick="removeStaff('oam','${esc(o.oam_id)}')">Deactivate</button></td>
           </tr>`).join('')}
         </tbody></table></div>
@@ -1134,11 +1144,16 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <button class="b" onclick="addStaff('tl')">Add TL</button>
         </div>
         <div class="tw" style="margin-top:10px"><table><thead><tr>
-          <th>TL Name</th><th>Email</th><th>Action</th>
+          <th>TL Name</th><th>Email</th><th>Move to OAM</th><th>Action</th>
         </tr></thead><tbody>
           ${tls.filter(t => t.status !== 'inactive').map(t => `<tr>
             <td>${esc(t.name)} (${esc(t.tl_id)})</td>
             <td>${esc(t.email)}</td>
+            <td>
+              <select onchange="moveTl('${esc(t.tl_id)}', this.value)">
+                ${tlMoveOpts(t.oam_id)}
+              </select>
+            </td>
             <td><button class="s r" onclick="removeStaff('tl','${esc(t.tl_id)}')">Deactivate</button></td>
           </tr>`).join('')}
         </tbody></table></div>
@@ -1153,52 +1168,34 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <label>Reports to TL<select id="newAgTl">${tlOpts}</select></label>
           <button class="b" onclick="addStaff('agent')">Add Agent</button>
         </div>
+        <div class="tw" style="margin-top:10px"><table><thead><tr>
+          <th>Agent Name</th><th>Move to TL</th><th>Action</th>
+        </tr></thead><tbody>
+          ${allAgents.map(a => `<tr>
+            <td>${esc(a.name)} (${esc(a.agent_id)})</td>
+            <td>
+              <select onchange="moveAgent('${esc(a.agent_id)}', this.value)">
+                ${agentMoveOpts(a.tl_id)}
+              </select>
+            </td>
+            <td><button class="s r" onclick="removeStaff('agent','${esc(a.agent_id)}')">Deactivate</button></td>
+          </tr>`).join('')}
+        </tbody></table></div>
       </div>
     `;
   }
 
-  function viewRoster() {
-    return `
-      <h2>Bulk Roster Upload</h2>
-      <div class="card">
-        <p class="mu" style="margin-top:0">Paste your CSV data below. Format: <code>BMS ID | Name | Email | PPR | Wave | TL ID</code></p>
-        <textarea id="ru" placeholder="6332878 | Abrahams, Machandro | m.abrahams@delta.example | 2581441 | 26.21 | 5972127"></textarea>
-        <p><button class="b" onclick="uploadRoster()">Upload Roster</button> <span id="rmsg" class="mu" style="margin-left:10px"></span></p>
-      </div>`;
-  }
+  window.moveOam = async (oamId, newOmId) => {
+    if (!newOmId) return;
+    const { error } = await sb.from('oams').update({ om_id: newOmId }).eq('oam_id', oamId);
+    if (error) return alert(error.message);
 
-  window.uploadRoster = async () => {
-    $('#rmsg').textContent = 'Uploading…';
-    $('#rmsg').style.color = 'var(--mu)';
-    const lines = $('#ru').value.split('\n').map(s => s.trim()).filter(Boolean);
-    let success = 0, failed = 0;
-    
-    for (const line of lines) {
-      const parts = line.split('|').map(s => s.trim());
-      if (parts.length < 6) { failed++; continue; }
-      
-      const [id, name, email, ppr, wave, tlid] = parts;
-      const isNA = !tlid || tlid.toUpperCase() === 'NA';
-      
-      let oam_id = null, om_id = null;
-      if (!isNA) {
-        const { data: tl } = await sb.from('tls').select('oam_id, om_id').eq('tl_id', tlid).maybeSingle();
-        if (tl) { oam_id = tl.oam_id; om_id = tl.om_id; }
-      }
-      
-      const { error } = await sb.from('agents').upsert({
-        agent_id: id, name: name, email: email, 
-        ppr: ppr || null, wave: wave?.replace(/\s+/g,'') || null,
-        tl_id: isNA ? null : tlid,
-        oam_id: oam_id, om_id: om_id,
-        reports_direct_to_oam: isNA, status: 'active'
-      });
-      
-      if (error) { console.error(error); failed++; } else { success++; }
-    }
-    
-    $('#rmsg').textContent = `Done! ${success} loaded, ${failed} failed.`;
-    $('#rmsg').style.color = 'var(--ok)';
+    await sb.from('tls').update({ om_id: newOmId }).eq('oam_id', oamId);
+    await sb.from('agents').update({ om_id: newOmId }).eq('oam_id', oamId);
+
+    const { data: oamData } = await sb.from('oams').select('*'); oams = oamData || [];
+    alert('OAM moved successfully!');
+    render();
   };
 
   window.selectAdminOam = (id) => { adminSelectedOam = id; adminSelectedTl = null; render(); };
