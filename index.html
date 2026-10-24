@@ -190,15 +190,25 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         })
       .on('postgres_changes', { event:'UPDATE', schema:'public', table:'qa_reviews' },
         async payload => {
+          // Update the UI immediately
           if (!document.getElementById('fref') && !document.getElementById('qaInsights') && !document.getElementById('coachNotes')) { 
             await refresh(); 
           }
           
+          // Notify the correct roles EXACTLY like the TL/Agent logic
           if (['qa', 'trainer', 'oam', 'om'].includes(me.role)) {
             playChime();
-            let msg = "NOTIFICATION: A QA Review has been updated.";
-            if (payload.new.trainer_notes) msg += "\n\nTrainer Notes added.";
-            if (payload.new.oam_notes) msg += "\n\nOAM Notes added.";
+            
+            let msg = `NOTIFICATION: A QA Review has been updated for Request ${payload.new.request_id}.`;
+            
+            // Tell them who made the action
+            if (payload.new.trainer_status !== payload.old.trainer_status) {
+                msg += `\n\nTrainer marked it as: ${payload.new.trainer_status.toUpperCase()}`;
+            }
+            if (payload.new.oam_status !== payload.old.oam_status) {
+                msg += `\n\nOAM marked it as: ${payload.new.oam_status.toUpperCase()}`;
+            }
+
             alert(msg);
           }
         })
