@@ -77,7 +77,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let me = null, tab = null, reqs = [], agentReqs = [], archivedReqs = [], tls = [], oams = [], qaReviews = [], assignments = [], allAgents = [], auditEvents = [], chime = null, creditTypes = [], drillDown = null;
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
-  let qaShowAll = false; // For testing override
   
   // GLOBAL SEARCH MEMORY
   let qaFilterAgent = '';
@@ -187,13 +186,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           }
 
           if (payload.eventType === 'UPDATE' && me.role === 'qa' && ['approved','rejected'].includes(payload.new.status) && !['approved','rejected'].includes(payload.old.status)) {
-            const reqTl = payload.new.agent_team_tl_id;
-            const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
-            const isForMe = myTlIds.length === 0 || myTlIds.includes(reqTl);
-            if (isForMe) {
-              playChime();
-              alert(`NOTIFICATION: Request ${payload.new.request_id} is ready for QA review.`);
-            }
+            playChime();
+            alert(`NOTIFICATION: Request ${payload.new.request_id} is ready for QA review.`);
           }
         })
       .on('postgres_changes', { event:'*', schema:'public', table:'qa_reviews' },
@@ -214,7 +208,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
           const isActor = qa.updated_by && qa.updated_by === me.person_id;
 
-          // === QA REVIEW INSERTED ===
           if (payload.eventType === 'INSERT') {
             if (isActor) return;
             const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
@@ -226,7 +219,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
             return;
           }
 
-          // === QA REVIEW UPDATED ===
           if (payload.eventType === 'UPDATE') {
             if (isActor) return;
 
@@ -245,7 +237,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
               }
             }
 
-            // Bulletproof OAM -> TL Notification
             if (oamChanged || (qa.oam_status === 'actioned' && payload.old.oam_status !== 'actioned')) {
               const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
               const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
@@ -1102,18 +1093,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   function viewQAQueue() {
-    const myTlIds = assignments.filter(a => a.staff_id === me.person_id).map(a => a.tl_id);
-    
     const curAgent = window.memQaAgent || '';
     const curTl = window.memQaTl || '';
     const curReason = window.memQaReason || '';
 
+    // Bulletproof filter: Shows all approved/rejected requests without a review yet.
     const pendingQA = reqs.filter(r => {
-      const isPending = ['approved', 'rejected'].includes(r.status) && !qaReviews.find(q => q.request_id === r.request_id);
-      const isAssignedToMe = myTlIds.length === 0 || myTlIds.includes(r.agent_team_tl_id);
-      
-      if (qaShowAll) return isPending; // Override for testing
-      return isPending && isAssignedToMe;
+      const tlActioned = r.status === 'approved' || r.status === 'rejected';
+      const hasNoReview = !qaReviews.find(q => q.request_id === r.request_id);
+      return tlActioned && hasNoReview;
     });
     
     const tlOpts = tls.map(t => `<option value="${t.tl_id}" ${curTl === t.tl_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
@@ -1137,7 +1125,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
         <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
-        ${myTlIds.length > 0 ? `<button class="s" onclick="qaShowAll = !qaShowAll; render()" style="margin-left:auto;">${qaShowAll ? 'Show My Team Only' : 'Show All Requests (Override)'}</button>` : ''}
       </div>
 
       <div class="tw"><table><thead><tr>
@@ -1151,7 +1138,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <td>${esc(r.reason_code)}</td>
           <td><span class="pill s-${r.status}">${r.status}</span></td>
           <td><button class="b" onclick="openQAReview('${r.request_id}')">Review</button></td>
-        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found for your assigned teams.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="mu">No pending QA reviews found.</td></tr>'}
       </tbody></table></div>
       
       <div id="qaReviewForm"></div>
@@ -1294,7 +1281,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       
     const pendingActions = qaReviews.filter(q => {
       if (me.role === 'trainer' && q.trainer_status !== 'pending') return false;
-      if (me.role === 'oam' && q.oam_status !== 'pending') return false;
+      if (me.role === 'oam' && !['pending', 'reviewed'].includes(q.oam_status)) return false; // Fixed for OAM
       
       if (me.role === 'trainer') {
         const req = reqs.find(r => r.request_id === q.request_id);
