@@ -1469,14 +1469,9 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       }
     }
 
-    if (me.role === 'oam' && stat === 'actioned') {
-      alert('Action logged successfully! You can now choose to send it to the TL.');
-      openCoachingAction(reviewId); // Redraw the form in place to show the Send button
-    } else {
-      alert('Action logged successfully!');
-      $('#coachingForm').innerHTML = '';
-      await refresh();
-    }
+    alert('Action logged successfully!');
+    $('#coachingForm').innerHTML = '';
+    await refresh();
   };
 
   // ============ ADMIN VIEWS ============
