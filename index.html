@@ -1426,6 +1426,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     
     const { error } = await sb.from('qa_reviews').update({
       oam_sent_to_tl_at: new Date().toISOString(),
+      tl_ack_status: 'pending',
       updated_by: me.person_id
     }).eq('review_id', reviewId);
     
@@ -1449,13 +1450,24 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     
     if (error) return alert("DATABASE ERROR: " + error.message);
     
-    // Do not close the form for OAM if they just actioned it, so they can see the Send to TL button
-    if (me.role !== 'oam' || stat !== 'actioned') {
-      $('#coachingForm').innerHTML = '';
+    // Update local state so the form knows it is now actioned
+    const q = qaReviews.find(x => x.review_id === reviewId);
+    if (q) {
+      if (me.role === 'trainer') {
+        q.trainer_status = stat; q.trainer_notes = notes; q.coaching_date = cDate; q.coaching_type = cType;
+      } else {
+        q.oam_status = stat; q.oam_notes = notes;
+      }
     }
-    
-    alert('Action logged successfully!');
-    await refresh();
+
+    if (me.role === 'oam' && stat === 'actioned') {
+      alert('Action logged successfully! You can now choose to send it to the TL.');
+      openCoachingAction(reviewId); // Redraw the form in place to show the Send button
+    } else {
+      alert('Action logged successfully!');
+      $('#coachingForm').innerHTML = '';
+      await refresh();
+    }
   };
 
   // ============ ADMIN VIEWS ============
