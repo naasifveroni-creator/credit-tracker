@@ -78,7 +78,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   let adminSelectedOam = null, adminSelectedTl = null;
   let adminData = { config: {}, roster: [], anomalies: [], audit: [] };
   
-  // GLOBAL SEARCH MEMORY
   let qaFilterAgent = '';
   let qaFilterTl = '';
   let qaFilterReason = '';
@@ -1165,7 +1164,6 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           <option ${curReason === 'PolicyException' ? 'selected' : ''}>PolicyException</option>
         </select></label>
         <button class="s" onclick="window.memQaAgent=''; window.memQaTl=''; window.memQaReason=''; render()">Clear</button>
-        <button class="b" style="margin-left:auto;" onclick="refresh()">🔄 Force Refresh Queue</button>
       </div>
 
       <div class="tw"><table><thead><tr>
@@ -1376,8 +1374,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
     previousNotesHtml += `</div>`;
 
-    const canSendToTl = me.role === 'oam' && q.oam_status === 'actioned' && !q.oam_sent_to_tl_at;
-    const alreadySent = me.role === 'oam' && q.oam_status === 'actioned' && q.oam_sent_to_tl_at;
+    const showSendToTl = me.role === 'oam' && !q.oam_sent_to_tl_at;
 
     document.getElementById('coachingForm').innerHTML = `
       <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
@@ -1387,8 +1384,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
         <div class="row" style="margin-top:10px;">
           <label>Status<select id="coachStatus">
-            <option value="reviewed">Reviewed</option>
-            <option value="actioned">Actioned / Coached</option>
+            <option value="reviewed" ${q.oam_status === 'reviewed' ? 'selected' : ''}>Reviewed</option>
+            <option value="actioned" ${q.oam_status === 'actioned' ? 'selected' : ''}>Actioned / Coached</option>
           </select></label>
           ${me.role === 'trainer' ? `
             <label>Coaching Date<input type="date" id="coachDate" style="width:140px;" value="${q.coaching_date || ''}"></label>
@@ -1408,14 +1405,14 @@ textarea{width:100%;min-height:80px;font-family:inherit}
         <p><button class="b" onclick="submitCoachingAction('${q.review_id}')">Update Status</button> 
         <button class="s" onclick="document.getElementById('coachingForm').innerHTML=''">Cancel</button></p>
 
-        ${canSendToTl ? `
+        ${showSendToTl ? `
           <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--bd);">
             <p style="margin:0 0 8px; font-size:13px;"><strong>Send to TL for Acknowledgement</strong></p>
-            <p class="mu" style="margin:0 0 8px; font-size:12px;">This item is now actioned. Click below to formally send it to the agent's Team Leader to carry out coaching and acknowledge.</p>
+            <p class="mu" style="margin:0 0 8px; font-size:12px;">Click below to formally send this item to the agent's Team Leader to carry out coaching and acknowledge.</p>
             <button class="b" style="background:var(--ok)" onclick="submitOamSendToTl('${q.review_id}')">📤 Send to TL for Acknowledgement</button>
           </div>
         ` : ''}
-        ${alreadySent ? `
+        ${me.role === 'oam' && q.oam_sent_to_tl_at ? `
           <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--ok);">
             <p style="margin:0; font-size:13px; color:var(--ok);"><strong>✅ Already sent to TL on ${dtd(q.oam_sent_to_tl_at)}</strong></p>
           </div>
@@ -1451,8 +1448,13 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     const { error } = await sb.from('qa_reviews').update(updateData).eq('review_id', reviewId);
     
     if (error) return alert("DATABASE ERROR: " + error.message);
+    
+    // Do not close the form for OAM if they just actioned it, so they can see the Send to TL button
+    if (me.role !== 'oam' || stat !== 'actioned') {
+      $('#coachingForm').innerHTML = '';
+    }
+    
     alert('Action logged successfully!');
-    $('#coachingForm').innerHTML = '';
     await refresh();
   };
 
