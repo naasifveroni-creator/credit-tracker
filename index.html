@@ -561,18 +561,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       <p class="mu">Review next steps provided by the OAM, carry out the coaching, and acknowledge to close the loop.</p>
       <div id="tlAckForm"></div>
       <div class="tw" style="margin-top:10px;"><table><thead><tr>
-        <th>Request</th><th>QA Result</th><th>OAM Next Steps</th><th>Sent by OAM</th><th>Action</th>
+        <th>Request</th><th>QA Result</th><th>Trainer Notes</th><th>OAM Next Steps</th><th>Sent by OAM</th><th>Action</th>
       </tr></thead><tbody>
         ${pendingAcks.map(q => {
           let oamNotes = q.oam_notes ? esc(q.oam_notes) : 'None provided';
+          let trainerNotes = q.trainer_notes ? esc(q.trainer_notes) : 'None provided';
           return `<tr>
             <td><b>${q.request_id}</b></td>
             <td><span class="pill ${q.qa_result === 'pass' ? 's-approved' : 's-rejected'}">${q.qa_result.toUpperCase()}</span></td>
-            <td style="white-space:normal;min-width:250px;"><div style="padding-left:10px;border-left:2px solid var(--nv);">${oamNotes}</div></td>
+            <td style="white-space:normal;min-width:200px;"><div style="padding-left:10px;border-left:2px solid var(--wn);">${trainerNotes}</div></td>
+            <td style="white-space:normal;min-width:200px;"><div style="padding-left:10px;border-left:2px solid var(--nv);">${oamNotes}</div></td>
             <td>${dtd(q.oam_sent_to_tl_at)}</td>
             <td><button class="b" onclick="openTLAcknowledgement('${q.review_id}')">Review & Acknowledge</button></td>
           </tr>`;
-        }).join('') || '<tr><td colspan="5" class="mu">You have no pending coaching acknowledgements.</td></tr>'}
+        }).join('') || '<tr><td colspan="6" class="mu">You have no pending coaching acknowledgements.</td></tr>'}
       </tbody></table></div>
     `;
   }
