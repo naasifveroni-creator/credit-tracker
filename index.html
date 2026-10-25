@@ -1383,7 +1383,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
     previousNotesHtml += `</div>`;
 
-    const showSendToTl = me.role === 'oam' && !q.oam_sent_to_tl_at;
+    const showSendToTl = me.role === 'oam' && q.oam_status === 'actioned' && q.oam_notes && q.oam_notes.trim() !== '' && !q.oam_sent_to_tl_at;
 
     document.getElementById('coachingForm').innerHTML = `
       <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
@@ -1470,8 +1470,15 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
 
     alert('Action logged successfully!');
-    $('#coachingForm').innerHTML = '';
-    await refresh();
+
+    if (me.role === 'oam') {
+      // Keep the OAM action card open so the (now-eligible) Send to TL button is immediately clickable
+      await refresh();
+      openCoachingAction(reviewId);
+    } else {
+      $('#coachingForm').innerHTML = '';
+      await refresh();
+    }
   };
 
   // ============ ADMIN VIEWS ============
