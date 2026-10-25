@@ -1335,7 +1335,8 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       }
       
       if (me.role === 'oam') {
-        if (q.oam_status && !['pending', 'reviewed'].includes(q.oam_status)) return false;
+        if (q.oam_sent_to_tl_at) return false;
+        if (q.oam_status && !['pending', 'reviewed', 'actioned'].includes(q.oam_status)) return false;
       }
       
       return true;
