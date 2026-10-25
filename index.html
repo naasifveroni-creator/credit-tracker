@@ -265,16 +265,23 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
             if (tlAckChanged && qa.tl_ack_status === 'acknowledged') {
               const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isQaForMe = me.role === 'qa' && assignedQas.includes(me.person_id);
               const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
               const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
-              if (isQaSubmitter || isTrainerForMe || isOwningOam) {
+              if (isQaSubmitter || isQaForMe || isTrainerForMe || isOwningOam) {
                 playChime();
                 alert(`NOTIFICATION: TL acknowledged coaching for Request ${qa.request_id}.`);
               }
             }
 
             if (agentAckChanged && qa.agent_ack_status === 'pending') {
-              if (me.role === 'agent' && req.agent_id === me.person_id) {
+              const isQaSubmitter = me.role === 'qa' && qa.qa_agent_id === me.person_id;
+              const isQaForMe = me.role === 'qa' && assignedQas.includes(me.person_id);
+              const isTrainerForMe = me.role === 'trainer' && assignedTrainers.includes(me.person_id);
+              const isOwningOam = me.role === 'oam' && owningOam === me.oam_id;
+              const isAgentForMe = me.role === 'agent' && req.agent_id === me.person_id;
+
+              if (isQaSubmitter || isQaForMe || isTrainerForMe || isOwningOam || isAgentForMe) {
                 playChime();
                 alert(`NOTIFICATION: Coaching logged for Request ${qa.request_id}. Please acknowledge in your My Coaching tab.`);
               }
