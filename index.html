@@ -517,13 +517,19 @@ textarea{width:100%;min-height:80px;font-family:inherit}
   }
 
   window.submitReq = async () => {
+    const notesVal = $('#fnotes').value.trim();
+    if (notesVal.length < 50) {
+      $('#fmsg').textContent = `Reason notes must be at least 50 characters (currently ${notesVal.length}).`;
+      $('#fmsg').style.color = 'var(--ac)';
+      return;
+    }
     $('#fmsg').textContent = 'Submitting…';
     const { data, error } = await sb.rpc('submit_credit_request', {
       p_customer_reference: $('#fref').value.trim(),
       p_credit_type_id: $('#ftype').value,
       p_amount: +$('#famt').value,
       p_reason_code: $('#frc').value,
-      p_reason_notes: $('#fnotes').value,
+      p_reason_notes: notesVal,
       p_agent_recommendation: $('#frec').value.trim() || null,
       p_currency: $('#fcur').value
     });
@@ -1109,7 +1115,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
           }
 
           if (q.qa_result === 'fail') {
-            const tlAckStr = q.tl_ack_status === 'acknowledged' ? `<span style="color:var(--ok)">✅ TL Acknowledged (${dtd(q.tl_ack_at)})</span>` : (q.oam_sent_to_tl_at ? `<span class="mu">⏳ Awaiting TL Ack (sent ${dtd(q.oam_sent_to_tl_at)})</span>` : `<span class="mu">⏳ Awaiting OAM Send</span>`);
+            const tlAckStr = q.tl_ack_status === 'not_required' ? `<span style="color:var(--ok)">✅ No TL Ack Required</span>` : (q.tl_ack_status === 'acknowledged' ? `<span style="color:var(--ok)">✅ TL Acknowledged (${dtd(q.tl_ack_at)})</span>` : (q.oam_sent_to_tl_at ? `<span class="mu">⏳ Awaiting TL Ack (sent ${dtd(q.oam_sent_to_tl_at)})</span>` : `<span class="mu">⏳ Awaiting OAM Send</span>`));
             const agentAckStr = q.agent_ack_status === 'acknowledged' ? `<span style="color:var(--ok)">✅ Agent Acknowledged (${dtd(q.agent_ack_at)})</span>` : (q.agent_ack_status === 'pending' ? `<span class="mu">⏳ Awaiting Agent Ack</span>` : `<span class="mu" style="opacity:0.5">-</span>`);
             
             combinedNotes += `<div style="padding-left:10px; border-left:2px solid var(--ok); margin-top:6px; font-size:11px;">
@@ -1336,6 +1342,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
       
       if (me.role === 'oam') {
         if (q.oam_sent_to_tl_at) return false;
+        if (q.tl_ack_status === 'not_required') return false;
         if (q.oam_status && !['pending', 'reviewed', 'actioned'].includes(q.oam_status)) return false;
       }
       
@@ -1384,7 +1391,7 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     }
     previousNotesHtml += `</div>`;
 
-    const showSendToTl = me.role === 'oam' && q.oam_status === 'actioned' && q.oam_notes && q.oam_notes.trim() !== '' && !q.oam_sent_to_tl_at;
+    const showSendToTl = me.role === 'oam' && q.oam_status === 'actioned' && q.oam_notes && q.oam_notes.trim() !== '' && !q.oam_sent_to_tl_at && q.tl_ack_status !== 'not_required';
 
     document.getElementById('coachingForm').innerHTML = `
       <div class="card" style="margin-top:20px; border: 2px solid var(--nv);">
@@ -1417,14 +1424,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
 
         ${showSendToTl ? `
           <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--bd);">
-            <p style="margin:0 0 8px; font-size:13px;"><strong>Send to TL for Acknowledgement</strong></p>
-            <p class="mu" style="margin:0 0 8px; font-size:12px;">Click below to formally send this item to the agent's Team Leader to carry out coaching and acknowledge.</p>
+            <p style="margin:0 0 8px; font-size:13px;"><strong>Close the loop for this item</strong></p>
+            <p class="mu" style="margin:0 0 8px; font-size:12px;">Either send to the agent's Team Leader for coaching acknowledgement, or mark that no TL acknowledgement is required for this case.</p>
             <button class="b" style="background:var(--ok)" onclick="submitOamSendToTl('${q.review_id}')">📤 Send to TL for Acknowledgement</button>
+            <button class="s" style="margin-left:8px;" onclick="submitOamNoAckNeeded('${q.review_id}')">No Acknowledgement Needed</button>
           </div>
         ` : ''}
         ${me.role === 'oam' && q.oam_sent_to_tl_at ? `
           <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--ok);">
             <p style="margin:0; font-size:13px; color:var(--ok);"><strong>✅ Already sent to TL on ${dtd(q.oam_sent_to_tl_at)}</strong></p>
+          </div>
+        ` : ''}
+        ${me.role === 'oam' && q.tl_ack_status === 'not_required' ? `
+          <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; border:1px solid var(--ok);">
+            <p style="margin:0; font-size:13px; color:var(--ok);"><strong>✅ Marked as No Acknowledgement Required</strong></p>
           </div>
         ` : ''}
       </div>
@@ -1442,6 +1455,20 @@ textarea{width:100%;min-height:80px;font-family:inherit}
     
     if (error) return alert("DATABASE ERROR: " + error.message);
     alert('Sent to TL for acknowledgement!');
+    $('#coachingForm').innerHTML = '';
+    await refresh();
+  };
+
+  window.submitOamNoAckNeeded = async (reviewId) => {
+    if (!confirm("Mark this item as No Acknowledgement Needed? It will be removed from your queue and will NOT be sent to the TL.")) return;
+    
+    const { error } = await sb.from('qa_reviews').update({
+      tl_ack_status: 'not_required',
+      updated_by: me.person_id
+    }).eq('review_id', reviewId);
+    
+    if (error) return alert("DATABASE ERROR: " + error.message);
+    alert('Marked as No Acknowledgement Required.');
     $('#coachingForm').innerHTML = '';
     await refresh();
   };
